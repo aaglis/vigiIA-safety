@@ -7,7 +7,7 @@ ENV NODE_ENV=production \
     VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 COPY package.json ./
-RUN npm install
+RUN npm install --include=dev
 
 COPY . .
 RUN npm run build
