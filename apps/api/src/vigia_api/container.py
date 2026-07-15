@@ -67,7 +67,7 @@ def build_container(config: Settings | None = None, *, repository_backend: str |
         edge_worker_repository = InMemoryEdgeWorkerRepository()
         evidence_metadata_repository = InMemoryEvidenceMetadataRepository()
         operations_repository = InMemoryOperationsRepository()
-    auth_service = AuthService(repository=auth_repository)
+    auth_service = AuthService(repository=auth_repository, config=config)
     evidence_service = EvidenceService(metadata_repository=evidence_metadata_repository)
     edge_worker_service = EdgeWorkerService(incident_repository=incident_repository, repository=edge_worker_repository, evidence_service=evidence_service, operations_repository=operations_repository)
     container = AppContainer(

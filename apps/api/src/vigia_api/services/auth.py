@@ -5,7 +5,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from ..domain.auth import AuthTokens, AuthenticatedUser, MembershipSummary, OrganizationSummary, Permission, User, UserSession, PlatformRole
-from ..settings import settings
+from ..settings import Settings, settings
 from ..observability import log_event
 from .security import decode_jwt, encode_jwt, generate_token, hash_password, hash_token, verify_password
 
@@ -65,9 +65,10 @@ class SqlAuthRepositoryFallback(InMemoryAuthRepository):
 
 
 class AuthService:
-    def __init__(self, repository: Any | None = None) -> None:
+    def __init__(self, repository: Any | None = None, config: Settings | None = None) -> None:
         self.repository = repository or InMemoryAuthRepository()
-        if settings.app_env.lower() in {"dev", "demo", "local"}:
+        self.settings = config or settings
+        if self.settings.app_env.lower() in {"dev", "demo", "local"}:
             self.repository.seed_demo_user()
 
     def _user_memberships(self, user_id: str) -> list[MembershipSummary]:
@@ -130,9 +131,9 @@ class AuthService:
         refresh_token = generate_token()
         session = UserSession(id=self._new_session_id(), user_id=user.id, refresh_token_hash=hash_token(refresh_token), expires_at=datetime.now(timezone.utc) + timedelta(days=30), user_agent=user_agent, ip_address=ip_address)
         self._save_session(session)
-        access_token = encode_jwt({"sub": user.id, "sid": session.id}, settings.jwt_secret, settings.access_token_ttl_seconds)
+        access_token = encode_jwt({"sub": user.id, "sid": session.id}, self.settings.jwt_secret, self.settings.access_token_ttl_seconds)
         log_event("auth.login.success", organization_id=None, edge_worker_id=None, user_id=user.id, email_domain=user.email.split("@")[-1])
-        return AuthTokens(access_token=access_token, refresh_token=refresh_token, access_token_expires_in=settings.access_token_ttl_seconds), session, AuthenticatedUser(user=user, memberships=self._user_memberships(user.id))
+        return AuthTokens(access_token=access_token, refresh_token=refresh_token, access_token_expires_in=self.settings.access_token_ttl_seconds), session, AuthenticatedUser(user=user, memberships=self._user_memberships(user.id))
 
     def refresh(self, refresh_token: str) -> tuple[AuthTokens, UserSession, AuthenticatedUser]:
         token_hash = hash_token(refresh_token)
@@ -145,9 +146,9 @@ class AuthService:
         new_refresh_token = generate_token()
         new_session = UserSession(id=self._new_session_id(), user_id=user.id, refresh_token_hash=hash_token(new_refresh_token), expires_at=datetime.now(timezone.utc) + timedelta(days=30), user_agent=session.user_agent, ip_address=session.ip_address, active_organization_id=session.active_organization_id)
         self._save_session(new_session)
-        access_token = encode_jwt({"sub": user.id, "sid": new_session.id}, settings.jwt_secret, settings.access_token_ttl_seconds)
+        access_token = encode_jwt({"sub": user.id, "sid": new_session.id}, self.settings.jwt_secret, self.settings.access_token_ttl_seconds)
         log_event("auth.refresh", user_id=user.id)
-        return AuthTokens(access_token=access_token, refresh_token=new_refresh_token, access_token_expires_in=settings.access_token_ttl_seconds), new_session, AuthenticatedUser(user=user, memberships=self._user_memberships(user.id))
+        return AuthTokens(access_token=access_token, refresh_token=new_refresh_token, access_token_expires_in=self.settings.access_token_ttl_seconds), new_session, AuthenticatedUser(user=user, memberships=self._user_memberships(user.id))
 
     def logout(self, refresh_token: str) -> None:
         token_hash = hash_token(refresh_token)
@@ -158,7 +159,7 @@ class AuthService:
             log_event("auth.logout", user_id=session.user_id)
 
     def get_current_user(self, access_token: str) -> AuthenticatedUser:
-        payload = decode_jwt(access_token, settings.jwt_secret)
+        payload = decode_jwt(access_token, self.settings.jwt_secret)
         user_id = cast(str, payload["sub"])
         user = self._get_user(user_id)
         session_id = cast(str, payload.get("sid"))

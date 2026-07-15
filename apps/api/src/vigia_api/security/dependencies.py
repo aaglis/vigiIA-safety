@@ -41,7 +41,10 @@ def get_auth_service(request: Request) -> AuthService:
 def get_current_user(request: Request, access_token: str | None = Cookie(default=None, alias=settings.access_cookie_name)):
     if not access_token:
         raise HTTPException(status_code=401, detail="missing access token")
-    return get_auth_service(request).get_current_user(access_token)
+    try:
+        return get_auth_service(request).get_current_user(access_token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="invalid access token") from exc
 
 
 def _resolve_organization_id(organization_id: str | None = None, org_id: str | None = None) -> str:
