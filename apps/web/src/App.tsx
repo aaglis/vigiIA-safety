@@ -8,9 +8,11 @@ import type { AuditLogEntry, Incident, IncidentStatus } from './api/incidents'
 import { acknowledgeIncident, dismissIncident, getIncident, getIncidentAuditLog, listIncidents, resolveIncident } from './api/incidents'
 import type { EvidenceItem } from './api/evidence'
 import { getEvidenceDownloadUrl, listEvidence } from './api/evidence'
+import { OverviewPage } from './pages/authenticated/OverviewPage'
 
 type Screen = 'landing' | 'login' | 'dashboard'
 type ConnectionMode = 'live' | 'demo' | null
+type AppSection = 'dashboard' | 'incidents' | 'evidence' | 'operations' | 'organizations' | 'users' | 'audit' | 'settings'
 
 type DemoState = {
   me: MeResponse
@@ -375,6 +377,17 @@ const securityPoints = [
   { title: 'Evidências privadas', text: 'Isoladas por organização, com URLs assinadas e auditoria de acesso.' },
   { title: 'Auditoria completa', text: 'Trilha de ações sensíveis e retenção configurável por organização.' },
 ] as const
+
+const workspaceNavItems: Array<{ id: AppSection; label: string; hint: string }> = [
+  { id: 'dashboard', label: 'Dashboard', hint: 'Visão geral' },
+  { id: 'incidents', label: 'Incidentes', hint: 'Triagem e ação' },
+  { id: 'evidence', label: 'Evidências', hint: 'Snapshot e clipes' },
+  { id: 'operations', label: 'Operações/Câmeras', hint: 'Sites, zonas e EPI' },
+  { id: 'organizations', label: 'Organizações', hint: 'Tenants e unidades' },
+  { id: 'users', label: 'Usuários', hint: 'Acesso e papéis' },
+  { id: 'audit', label: 'Auditoria', hint: 'Trilha de eventos' },
+  { id: 'settings', label: 'Configurações', hint: 'Preferências do sistema' },
+]
 
 const features = [
   {
@@ -897,6 +910,8 @@ function EvidenceExplorer({
 export default function App() {
   const [screen, setScreen] = useState<Screen>('landing')
   const [mode, setMode] = useState<ConnectionMode>(null)
+  const [workspaceSection, setWorkspaceSection] = useState<AppSection>('dashboard')
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [booting, setBooting] = useState(true)
   const [banner, setBanner] = useState<string | null>(null)
   const [loginEmail, setLoginEmail] = useState(demoEmail)
@@ -961,6 +976,27 @@ export default function App() {
   const goLanding = () => {
     setScreen('landing')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const resetAuthenticatedState = () => {
+    setMode(null)
+    setMeData(null)
+    setIncidents([])
+    setOperationsCatalog(null)
+    setSelectedIncidentId(null)
+    setAuditLog([])
+    setOperationsLoading(false)
+    setOperationsError(null)
+    setEvidenceItems([])
+    setSelectedEvidenceId(null)
+    setEvidenceLoading(false)
+    setEvidenceError(null)
+    setEvidenceDownloadUrl(null)
+    setEvidenceDownloadLoading(false)
+    setEvidenceDownloadError(null)
+    setDashboardError(null)
+    setWorkspaceSection('dashboard')
+    setMobileNavOpen(false)
   }
 
   const clearIncidentDetailState = () => {
@@ -1098,29 +1134,23 @@ export default function App() {
     setEvidenceDownloadLoading(false)
     setEvidenceDownloadError(null)
     setDashboardError(null)
+    setWorkspaceSection('dashboard')
+    setMobileNavOpen(false)
     setBanner(reason ?? 'Modo demonstração local ativo. A API não respondeu neste ambiente.')
     setScreen('dashboard')
     setBooting(false)
   }
 
   const expireSession = (reason = 'Sessão expirada. Entre novamente para continuar no modo conectado.') => {
-    setMode(null)
-    setMeData(null)
-    setIncidents([])
-    setOperationsCatalog(null)
-    setSelectedIncidentId(null)
-    setAuditLog([])
-    setOperationsLoading(false)
-    setOperationsError(null)
-    setEvidenceItems([])
-    setSelectedEvidenceId(null)
-    setEvidenceLoading(false)
-    setEvidenceError(null)
-    setEvidenceDownloadUrl(null)
-    setEvidenceDownloadLoading(false)
-    setEvidenceDownloadError(null)
-    setDashboardError(null)
+    resetAuthenticatedState()
     setBanner(reason)
+    setScreen('login')
+    setBooting(false)
+  }
+
+  const logout = () => {
+    resetAuthenticatedState()
+    setBanner(null)
     setScreen('login')
     setBooting(false)
   }
@@ -1150,6 +1180,8 @@ export default function App() {
         setOperationsError(`Não foi possível carregar a configuração operacional: ${normalizeApiError(operationsResult.reason)}`)
       }
       await refreshIncidentList(meResponse, incidentFilters, preferredIncidentId ?? null)
+      setWorkspaceSection('dashboard')
+      setMobileNavOpen(false)
       setScreen('dashboard')
     } catch (error) {
       if (isSessionError(error)) {
@@ -1345,6 +1377,8 @@ export default function App() {
       const loginResponse = await login({ email, password })
       const meResponse = await me().catch(() => loginResponse.me)
       setBanner(null)
+      setWorkspaceSection('dashboard')
+      setMobileNavOpen(false)
       await hydrateLiveDashboard(meResponse)
     } catch (error) {
       const shouldFallbackToDemo = forceDemo || email === demoEmail || password === demoPassword || !isApiError(error)
@@ -1408,6 +1442,593 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (screen !== 'dashboard') return
+    setMobileNavOpen(false)
+  }, [screen])
+
+  const activeWorkspaceItem = workspaceNavItems.find((item) => item.id === workspaceSection) ?? workspaceNavItems[0]
+
+  const openWorkspaceSection = (section: AppSection) => {
+    setWorkspaceSection(section)
+    setMobileNavOpen(false)
+  }
+
+  const recentIncidents = incidents.slice(0, 4)
+  const criticalIncidents = incidents.filter((incident) => incident.status !== 'resolved' && incident.severity.toLowerCase() === 'high').length
+  const acknowledgementDurations = incidents
+    .filter((incident) => incident.acknowledged_at && incident.created_at)
+    .map((incident) => (new Date(incident.acknowledged_at as string).getTime() - new Date(incident.created_at).getTime()) / 60_000)
+    .filter((value) => Number.isFinite(value) && value >= 0)
+  const avgAcknowledgementMinutes = acknowledgementDurations.length > 0
+    ? Math.round(acknowledgementDurations.reduce((sum, value) => sum + value, 0) / acknowledgementDurations.length)
+    : null
+  const activeCamerasCount = operationCameras.filter((camera) => camera.status === 'active').length
+  const evidenceAvailableCount = evidenceItems.length
+  const evidencePendingCount = Math.max(incidents.filter((incident) => incident.status === 'open').length - evidenceAvailableCount, 0)
+  const overviewHealth = [
+    {
+      label: 'API',
+      tone: mode === 'live' ? 'good' : mode === 'demo' ? 'warning' : 'neutral',
+      detail: mode === 'live'
+        ? 'Conexão ativa com o backend e respostas carregadas no shell.'
+        : mode === 'demo'
+          ? 'Ambiente em demonstração local; os fluxos continuam funcionais.'
+          : 'Aguardando sessão autenticada para validar o endpoint.',
+    },
+    {
+      label: 'Banco de dados',
+      tone: incidents.length > 0 ? 'good' : dashboardLoading ? 'warning' : 'neutral',
+      detail: incidents.length > 0
+        ? 'Incidentes, auditoria e contexto operacional foram lidos com sucesso.'
+        : dashboardLoading
+          ? 'Carregando registros operacionais…'
+          : 'Sem amostra suficiente para confirmar disponibilidade.',
+    },
+    {
+      label: 'Storage',
+      tone: evidenceItems.length > 0 ? 'good' : selectedIncident ? 'warning' : 'neutral',
+      detail: evidenceItems.length > 0
+        ? 'Ao menos uma evidência foi carregada para o incidente em foco.'
+        : selectedIncident
+          ? 'Nenhuma evidência carregada para o incidente em foco.'
+          : 'Selecione um incidente para validar a camada de evidências.',
+    },
+    {
+      label: 'Edge worker',
+      tone: activeCamerasCount > 0 && incidents.length > 0 ? 'good' : mode === 'demo' ? 'warning' : 'neutral',
+      detail: activeCamerasCount > 0
+        ? `${activeCamerasCount} câmeras ativas e incidentes disponíveis para triagem.`
+        : 'Sem confirmação suficiente de telemetria de borda.',
+    },
+  ] as const
+
+  const renderResourcePlaceholder = (title: string, description: string, bullets: string[]) => (
+    <section className="space-y-6">
+      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+        <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">{activeWorkspaceItem.label}</p>
+        <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">{title}</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">{description}</p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <article className="rounded-[30px] border border-[color:var(--line)] bg-[var(--card)] p-6 shadow-[0_18px_50px_rgba(32,27,24,0.06)]">
+          <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--accent)]">Em construção</p>
+          <ul className="mt-4 space-y-3 text-sm leading-7 text-[var(--muted)]">
+            {bullets.map((bullet) => (
+              <li key={bullet} className="flex gap-3 rounded-[18px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.56)] px-4 py-3">
+                <span className="mt-1 h-2 w-2 rounded-full bg-[var(--accent)]" />
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        </article>
+
+        <aside className="rounded-[30px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-6 text-[var(--paper)] shadow-[0_24px_70px_rgba(32,27,24,0.16)]">
+          <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[rgba(245,243,239,0.7)]">Contexto</p>
+          <div className="mt-4 space-y-3 text-sm leading-7 text-[rgba(245,243,239,0.84)]">
+            <p>Organização ativa: {activeOrganization?.name ?? '—'}</p>
+            <p>Usuário: {meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
+            <p>Status: {liveLabel}</p>
+          </div>
+          <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm text-[rgba(245,243,239,0.74)]">
+            Este espaço já segue o shell autenticado, então quando a tela ganhar CRUD real a navegação continuará intacta.
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
+
+  const renderOverviewSection = () => (
+    <section className="space-y-6">
+      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Dashboard</p>
+            <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Visão geral da operação</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">Painel de entrada para triagem, evidências e configuração operacional do tenant ativo.</p>
+          </div>
+          <div className="rounded-[24px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3 text-right">
+            <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Organização</p>
+            <p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization?.name ?? 'Organização ativa'}</p>
+            <p className="text-xs text-[var(--muted)]">{meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {[
+            ['Incidentes', incidentSummary.total],
+            ['Abertos', incidentSummary.open],
+            ['Reconhecidos', incidentSummary.acknowledged],
+            ['Resolvidos', incidentSummary.resolved],
+            ['Sites', operationSites.length],
+          ].map(([label, value]) => (
+            <article key={label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.66)] p-4">
+              <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">{label}</p>
+              <p className="mt-3 font-display text-3xl text-[var(--ink)]">{String(value)}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button type="button" onClick={() => openWorkspaceSection('incidents')} className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.22)] transition hover:-translate-y-0.5">
+            Abrir incidentes
+          </button>
+          <button type="button" onClick={() => openWorkspaceSection('evidence')} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">
+            Ver evidências
+          </button>
+          <button type="button" onClick={() => openWorkspaceSection('operations')} className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.64)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5">
+            Operações e câmeras
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <article className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+          <SectionHeading eyebrow="Incidentes recentes" title="Triagem pronta para ação" description="Acesso rápido aos eventos mais recentes sem perder a consistência visual do produto." />
+          <div className="mt-5 space-y-3">
+            {recentIncidents.length === 0 ? (
+              <div className="rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-6 text-sm text-[var(--muted)]">Nenhum incidente disponível no momento.</div>
+            ) : (
+              recentIncidents.map((incident) => (
+                <button
+                  key={incident.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedIncidentId(incident.id)
+                    openWorkspaceSection('incidents')
+                  }}
+                  className={`w-full rounded-[28px] border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(32,27,24,0.08)] ${selectedIncidentId === incident.id ? 'border-[rgba(193,85,43,0.35)] bg-[rgba(193,85,43,0.06)]' : 'border-[color:var(--line)] bg-[rgba(255,255,255,0.55)]'}`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-display text-xl text-[var(--ink)]">{incident.summary}</p>
+                        <StatusPill status={incident.status} />
+                      </div>
+                      <p className="mt-2 text-sm text-[var(--muted)]">{incident.site_id ?? 'Site não informado'} · {incident.camera_id} · Zona {incident.zone_id}</p>
+                    </div>
+                    <SeverityPill severity={incident.severity} />
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className="rounded-[34px] border border-[color:var(--line)] bg-[var(--card)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+          <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Conexão</p>
+          <h2 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)]">{liveLabel}</h2>
+          <p className="mt-3 text-sm leading-7 text-[var(--muted)]">O shell continua responsivo mesmo quando o modo é demo, então a navegação não quebra enquanto os dados carregam.</p>
+
+          <div className="mt-6 grid gap-3">
+            <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-4">
+              <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Usuário</p>
+              <p className="mt-2 font-display text-lg text-[var(--ink)]">{meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
+            </div>
+            <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-4">
+              <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Organização ativa</p>
+              <p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization?.name ?? '—'}</p>
+            </div>
+            <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-4">
+              <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Catálogo operacional</p>
+              <p className="mt-2 font-display text-lg text-[var(--ink)]">{operationsCatalog ? 'Carregado' : operationsLoading ? 'Carregando…' : 'Indisponível'}</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  )
+
+  const renderIncidentsSection = () => (
+    <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+      <div className="space-y-6">
+        <section className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+          <SectionHeading eyebrow="Incidentes" title="Triagem operacional" description="Lista, filtros e detalhe seguem no mesmo shell para manter a resposta rápida sob pressão." />
+
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] px-3 py-1">{incidentSummary.total} registros</span>
+              {hasActiveIncidentFilters ? <span className="rounded-full border border-[rgba(193,85,43,0.18)] bg-[rgba(193,85,43,0.08)] px-3 py-1 text-[#9e4120]">Filtros ativos</span> : null}
+              {dashboardLoading ? <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] px-3 py-1">Atualizando…</span> : null}
+            </div>
+            <button type="button" onClick={resetIncidentFilters} className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">
+              Limpar filtros
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Status</span>
+              <select value={incidentFilters.status} onChange={(event) => updateIncidentFilters({ status: event.target.value as IncidentStatus | 'all' })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todos</option>
+                <option value="open">Aberto</option>
+                <option value="acknowledged">Reconhecido</option>
+                <option value="resolved">Resolvido</option>
+                <option value="dismissed">Descartado</option>
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Severidade</span>
+              <select value={incidentFilters.severity} onChange={(event) => updateIncidentFilters({ severity: event.target.value })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todas</option>
+                {Array.from(new Set(['high', 'medium', 'low', ...incidents.map((incident) => incident.severity.toLowerCase())])).filter((value, index, list) => list.indexOf(value) === index).map((value) => (
+                  <option key={value} value={value} className="capitalize">{value === 'high' ? 'Alta' : value === 'medium' ? 'Média' : value === 'low' ? 'Baixa' : value}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Site</span>
+              <select value={incidentFilters.siteId} onChange={(event) => updateIncidentFilters({ siteId: event.target.value, cameraId: 'all', zoneId: 'all' })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todos</option>
+                {filteredSiteOptions.map((site) => <option key={site.id} value={site.id}>{site.name} · {site.id}</option>)}
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Câmera</span>
+              <select value={incidentFilters.cameraId} onChange={(event) => updateIncidentFilters({ cameraId: event.target.value, zoneId: 'all' })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todas</option>
+                {filteredCameraOptions.map((camera) => <option key={camera.id} value={camera.id}>{camera.name} · {camera.id}</option>)}
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Zona</span>
+              <select value={incidentFilters.zoneId} onChange={(event) => updateIncidentFilters({ zoneId: event.target.value })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todas</option>
+                {filteredZoneOptions.map((zone) => <option key={zone.id} value={zone.id}>{zone.id} · {zone.zone_type}</option>)}
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Período</span>
+              <select value={incidentFilters.period} onChange={(event) => {
+                const period = event.target.value as IncidentPeriod
+                if (period === 'all') {
+                  updateIncidentFilters({ period: 'all', createdFrom: '', createdTo: '' })
+                  return
+                }
+                if (period === 'custom') {
+                  const fallback = getPresetRange('7d')
+                  updateIncidentFilters({ period: 'custom', createdFrom: formatDateInput(incidentFilters.createdFrom) || fallback.createdFrom.slice(0, 10), createdTo: formatDateInput(incidentFilters.createdTo) || fallback.createdTo.slice(0, 10) })
+                  return
+                }
+                updateIncidentFilters({ period })
+              }} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
+                <option value="all">Todo o período</option>
+                <option value="24h">Últimas 24h</option>
+                <option value="7d">Últimos 7 dias</option>
+                <option value="30d">Últimos 30 dias</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </label>
+          </div>
+
+          {incidentFilters.period === 'custom' ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Criado de</span>
+                <input type="date" value={formatDateInput(incidentFilters.createdFrom)} onChange={(event) => updateIncidentFilters({ period: 'custom', createdFrom: event.target.value })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]" />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Criado até</span>
+                <input type="date" value={formatDateInput(incidentFilters.createdTo)} onChange={(event) => updateIncidentFilters({ period: 'custom', createdTo: event.target.value })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]" />
+              </label>
+            </div>
+          ) : null}
+
+          <div className="mt-6 space-y-3">
+            {dashboardLoading && incidents.length === 0 ? (
+              <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">Carregando incidentes…</div>
+            ) : incidents.length === 0 ? (
+              <div className="rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">
+                {hasActiveIncidentFilters ? (
+                  <div className="space-y-2">
+                    <p className="font-display text-2xl text-[var(--ink)]">Nenhum incidente encontrou esses filtros.</p>
+                    <p>Revise status, severidade, site, câmera, zona ou período para voltar a ver eventos.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="font-display text-2xl text-[var(--ink)]">Nenhum incidente registrado para esta organização.</p>
+                    <p>Quando o worker começar a enviar eventos, eles aparecerão aqui com triagem, contexto e auditoria.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              incidents.map((incident) => (
+                <button key={incident.id} type="button" onClick={() => activeOrganization && void loadIncidentContext(activeOrganization.id, incident.id)} className={`w-full rounded-[28px] border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(32,27,24,0.08)] ${selectedIncidentId === incident.id ? 'border-[rgba(193,85,43,0.35)] bg-[rgba(193,85,43,0.06)]' : 'border-[color:var(--line)] bg-[rgba(255,255,255,0.55)]'}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-display text-xl text-[var(--ink)]">{incident.summary}</p>
+                        <StatusPill status={incident.status} />
+                      </div>
+                      <p className="mt-2 text-sm text-[var(--muted)]">{incident.site_id ?? 'Site não informado'} · {incident.camera_id} · Zona {incident.zone_id}</p>
+                    </div>
+                    <SeverityPill severity={incident.severity} />
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+
+      <div className="space-y-6">
+        <section className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-6 text-[var(--paper)] shadow-[0_26px_80px_rgba(32,27,24,0.18)]">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[rgba(245,243,239,0.7)]">Detalhe do incidente</p>
+              <h2 className="mt-3 font-display text-3xl leading-tight">{selectedIncident?.summary ?? 'Selecione um incidente'}</h2>
+            </div>
+            {selectedIncident ? <StatusPill status={selectedIncident.status} /> : null}
+          </div>
+
+          {selectedIncident ? (
+            <div className="mt-6 space-y-5 text-sm leading-7 text-[rgba(245,243,239,0.82)]">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Site</p><p className="mt-2 font-display text-lg text-[var(--paper)]">{selectedIncident.site_id ?? '—'}</p></div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Câmera</p><p className="mt-2 font-display text-lg text-[var(--paper)]">{selectedIncident.camera_id}</p></div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Severidade</p><p className="mt-2 font-display text-lg text-[var(--paper)] capitalize">{selectedIncident.severity}</p></div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Atualizado</p><p className="mt-2 font-display text-lg text-[var(--paper)]">{formatTimestamp(selectedIncident.updated_at)}</p></div>
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-white/5 p-4 text-[rgba(245,243,239,0.84)]">
+                <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Resumo de contexto</p>
+                <p className="mt-2">Selecione uma evidência para revisar snapshot, clipe e metadados técnicos sem sair do fluxo de triagem.</p>
+              </div>
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('acknowledge')} className="rounded-full bg-[var(--accent)] px-5 py-3 font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.28)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60">{actionBusy === 'acknowledge' ? 'Reconhecendo…' : 'Reconhecer'}</button>
+                <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('resolve')} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 font-medium text-[var(--paper)] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">{actionBusy === 'resolve' ? 'Resolvendo…' : 'Resolver'}</button>
+                <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('dismiss')} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 font-medium text-[var(--paper)] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">{actionBusy === 'dismiss' ? 'Descartando…' : 'Descartar'}</button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-6 text-sm leading-7 text-[rgba(245,243,239,0.72)]">Nenhum incidente selecionado.</p>
+          )}
+        </section>
+
+        {selectedIncident ? (
+          <section className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+            <SectionHeading eyebrow="Auditoria" title="Trilha do incidente" description="Registro de ações e histórico de resposta vinculados ao evento selecionado." />
+            <div className="mt-6 space-y-3">
+              {auditLog.length === 0 ? (
+                <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-5 text-sm text-[var(--muted)]">Sem registros de auditoria para este incidente.</div>
+              ) : (
+                auditLog.map((entry) => (
+                  <article key={entry.id} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-display text-lg text-[var(--ink)]">{entry.action}</p>
+                        <p className="mt-1 text-sm text-[var(--muted)]">{entry.actor} · {formatTimestamp(entry.created_at)}</p>
+                      </div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{entry.from_status ?? '—'} → {entry.to_status}</p>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </section>
+  )
+
+  const renderEvidenceSection = () => (
+    <section className="space-y-6">
+      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+        <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Evidências</p>
+        <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Revisão de snapshot e clipes</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">O painel mantém a mesma linguagem visual do login, mas aprofunda a inspeção com metadados e acesso seguro à evidência.</p>
+      </div>
+
+      {selectedIncident ? (
+        <EvidenceExplorer
+          incident={selectedIncident}
+          organizationName={activeOrganization?.name ?? null}
+          evidenceItems={evidenceItems}
+          selectedEvidence={selectedEvidence}
+          evidenceLoading={evidenceLoading}
+          evidenceError={evidenceError}
+          evidenceDownloadUrl={evidenceDownloadUrl}
+          evidenceDownloadLoading={evidenceDownloadLoading}
+          evidenceDownloadError={evidenceDownloadError}
+          onSelectEvidence={selectEvidence}
+          onOpenEvidence={() => void openSelectedEvidence()}
+          onRetry={() => void loadEvidenceContext(activeOrganization?.id ?? selectedIncident.organization_id, selectedIncident.id)}
+        />
+      ) : (
+        <div className="rounded-[34px] border border-dashed border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-8 text-sm leading-7 text-[var(--muted)] shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+          Selecione um incidente na aba <span className="font-medium text-[var(--ink)]">Incidentes</span> para abrir a evidência correspondente.
+        </div>
+      )}
+    </section>
+  )
+
+  const renderOperationsSection = () => (
+    <section className="space-y-6">
+      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+        <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Operações / câmeras</p>
+        <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Catálogo operacional do tenant</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">Sites, câmeras, zonas e regras continuam visíveis em blocos organizados, mas agora dentro do shell autenticado.</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {[
+          ['Sites', operationSites.length, 'site_id'],
+          ['Câmeras', operationCameras.length, 'camera_id'],
+          ['Zonas', operationZones.length, 'zone_id'],
+          ['Regras', operationRules.length, 'safety_rule'],
+          ['EPI', operationPpe.length, 'required_ppe'],
+        ].map(([label, value, hint]) => (
+          <article key={label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.66)] p-4">
+            <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">{label}</p>
+            <p className="mt-3 font-display text-3xl text-[var(--ink)]">{String(value)}</p>
+            <p className="mt-2 text-xs uppercase tracking-[0.22em] text-[var(--muted)]">{hint}</p>
+          </article>
+        ))}
+      </div>
+
+      {operationsLoading && !operationsCatalog ? (
+        <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">Carregando configuração operacional…</div>
+      ) : operationSites.length === 0 ? (
+        <div className="rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6">
+          <div className="max-w-2xl space-y-3">
+            <p className="font-display text-2xl text-[var(--ink)]">Nenhum site configurado para este tenant.</p>
+            <p className="text-sm leading-7 text-[var(--muted)]">Para preparar o piloto, cadastre um site, conecte ao menos uma câmera, desenhe as zonas e associe as regras e os EPIs.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {operationSites.map((site) => {
+            const siteCameras = operationCameras.filter((camera) => camera.site_id === site.id)
+            const siteZones = operationZones.filter((zone) => zone.site_id === site.id)
+            const siteRules = operationRules.filter((rule) => rule.site_id === site.id || (rule.zone_id ? siteZones.some((zone) => zone.id === rule.zone_id) : false))
+            const sitePpe = operationPpe.filter((item) => item.site_id === site.id || (item.zone_id ? siteZones.some((zone) => zone.id === item.zone_id) : false))
+
+            return (
+              <article key={site.id} className="rounded-[30px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-5 shadow-[0_16px_40px_rgba(32,27,24,0.06)]">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">site_id</p>
+                    <h3 className="mt-2 font-display text-2xl text-[var(--ink)]">{site.name}</h3>
+                    <p className="mt-2 text-sm text-[var(--muted)]">{site.id}{site.address ? ` · ${site.address}` : ''}</p>
+                  </div>
+                  <OperationStatusPill status={site.status} />
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3"><p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Câmeras</p><p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteCameras.length}</p></div>
+                  <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3"><p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Zonas</p><p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteZones.length}</p></div>
+                  <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3"><p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Regras / EPI</p><p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteRules.length} / {sitePpe.length}</p></div>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
+                    <p className="font-display text-lg text-[var(--ink)]">Câmeras vinculadas</p>
+                    <div className="mt-3 space-y-2">{siteCameras.length === 0 ? <p className="text-sm text-[var(--muted)]">Nenhuma câmera vinculada a este site.</p> : siteCameras.map((camera) => <div key={camera.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3"><div><p className="font-medium text-[var(--ink)]">{camera.name}</p><p className="mt-1 text-xs text-[var(--muted)]">{camera.id} · {camera.site_id}</p></div><OperationStatusPill status={camera.status} /></div>)}</div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
+                      <p className="font-display text-lg text-[var(--ink)]">Zonas</p>
+                      <div className="mt-3 space-y-2">{siteZones.length === 0 ? <p className="text-sm text-[var(--muted)]">Nenhuma zona cadastrada para este site.</p> : siteZones.map((zone) => <div key={zone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-[var(--ink)]">{zone.id}</p><ZoneTypePill zoneType={zone.zone_type} /></div><p className="mt-1 text-xs text-[var(--muted)]">camera_id {zone.camera_id} · site_id {zone.site_id}</p></div><OperationStatusPill status={zone.status} /></div>)}</div>
+                    </div>
+                    <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
+                      <p className="font-display text-lg text-[var(--ink)]">Regras / EPI</p>
+                      <div className="mt-3 space-y-2">{siteRules.length === 0 && sitePpe.length === 0 ? <p className="text-sm text-[var(--muted)]">Sem vínculo operacional para este site.</p> : [...siteRules.map((rule) => ({ key: rule.id, title: rule.name, meta: `rule_id ${rule.id}${rule.zone_id ? ` · zone_id ${rule.zone_id}` : ''}`, status: rule.status })), ...sitePpe.map((item) => ({ key: item.id, title: item.item, meta: `ppe_id ${item.id} · rule_id ${item.rule_id}`, status: item.status }))].map((item) => <div key={item.key} className="rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-[var(--ink)]">{item.title}</p><OperationStatusPill status={item.status} /></div><p className="mt-1 text-xs text-[var(--muted)]">{item.meta}</p></div>)}</div>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+
+  const renderAuditSection = () => (
+    <section className="space-y-6">
+      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
+        <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Auditoria</p>
+        <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Trilha de ações</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">A auditoria segue o mesmo padrão visual e mostra o histórico do incidente selecionado ou um estado pronto para uso futuro.</p>
+      </div>
+
+      {selectedIncident ? (
+        <div className="space-y-3">
+          {auditLog.length === 0 ? (
+            <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-5 text-sm text-[var(--muted)]">Sem registros de auditoria para este incidente.</div>
+          ) : (
+            auditLog.map((entry) => (
+              <article key={entry.id} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-display text-lg text-[var(--ink)]">{entry.action}</p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">{entry.actor} · {formatTimestamp(entry.created_at)}</p>
+                  </div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{entry.from_status ?? '—'} → {entry.to_status}</p>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+      ) : (
+        renderResourcePlaceholder('Auditoria sem seleção', 'Escolha um incidente em Incidentes para ver a trilha auditável vinculada ao evento.', ['Integração futura com exportação CSV/PDF', 'Visão global por usuário, site e janela de tempo', 'Filtros por organização e tipo de ação'])
+      )}
+    </section>
+  )
+
+  const renderWorkspaceContent = () => {
+    switch (workspaceSection) {
+      case 'dashboard':
+        return (
+          <OverviewPage
+            activeOrganization={activeOrganization?.name ?? 'Organização ativa'}
+            userName={meData?.user.full_name ?? meData?.user.email ?? '—'}
+            incidentSummary={incidentSummary}
+            criticalIncidents={criticalIncidents}
+            avgAcknowledgementMinutes={avgAcknowledgementMinutes}
+            activeCamerasCount={activeCamerasCount}
+            operationSitesCount={operationSites.length}
+            evidenceAvailableCount={evidenceAvailableCount}
+            evidencePendingCount={evidencePendingCount}
+            recentIncidents={recentIncidents}
+            selectedIncidentId={selectedIncidentId}
+            liveLabel={liveLabel}
+            dashboardLoading={dashboardLoading}
+            dashboardError={dashboardError}
+            health={overviewHealth}
+            onOpenIncidents={() => openWorkspaceSection('incidents')}
+            onOpenEvidence={() => openWorkspaceSection('evidence')}
+            onOpenOperations={() => openWorkspaceSection('operations')}
+            onSelectIncident={(id) => {
+              setSelectedIncidentId(id)
+              openWorkspaceSection('incidents')
+              if (activeOrganization) {
+                void loadIncidentContext(activeOrganization.id, id)
+              }
+            }}
+          />
+        )
+      case 'incidents':
+        return renderIncidentsSection()
+      case 'evidence':
+        return renderEvidenceSection()
+      case 'operations':
+        return renderOperationsSection()
+      case 'audit':
+        return renderAuditSection()
+      case 'organizations':
+        return renderResourcePlaceholder('Organizações', 'Administrar tenants, unidades e contexto operacional sem sair do shell autenticado.', ['Criar e editar organizações', 'Definir organização ativa por sessão', 'Relacionar sites, usuários e permissões'])
+      case 'users':
+        return renderResourcePlaceholder('Usuários', 'Gerenciar acesso, papéis e membros do tenant em uma superfície dedicada.', ['Convidar usuários', 'Atribuir papéis e permissões', 'Suspender ou reativar acesso'])
+      case 'settings':
+        return renderResourcePlaceholder('Configurações', 'Preferências de interface, retenção, notificações e comportamento operacional.', ['Temas e idioma', 'Retenção e auditoria', 'Notificações e integrações'])
+      default:
+        return renderOverviewSection()
+    }
+  }
 
   const statusSummary = [
     { label: 'Total', value: incidentSummary.total },
@@ -1582,508 +2203,77 @@ export default function App() {
       )}
 
       {screen === 'dashboard' && (
-        <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-6 lg:px-8">
-          <header className="reveal flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.76)] px-4 py-4 shadow-[0_20px_60px_rgba(32,27,24,0.08)] backdrop-blur-sm sm:px-5">
-            <button type="button" onClick={goLanding} className="flex items-center gap-3 text-left">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-[color:var(--line)] bg-[var(--paper)] text-[var(--ink)] shadow-[0_10px_30px_rgba(32,27,24,0.08)]">
-                <MonogramMark className="h-6 w-6" />
-              </span>
-              <span>
-                <span className="block font-display text-lg leading-none tracking-[0.08em]">VigIA</span>
-                <span className="mt-1 block text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Painel operacional</span>
-              </span>
-            </button>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.5)] px-4 py-2 text-xs uppercase tracking-[0.24em] text-[var(--muted)]">{liveLabel}</span>
-              <button type="button" onClick={() => { setScreen('landing'); setBanner(null) }} className="rounded-full border border-[color:var(--line)] bg-[var(--ink)] px-4 py-2 text-sm font-medium text-[var(--paper)] transition hover:-translate-y-0.5">
-                Voltar à landing
+        <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+          <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
+            <aside className="hidden w-80 shrink-0 flex-col border-r border-[color:var(--line)] bg-[rgba(245,243,239,0.88)] px-5 py-5 lg:flex lg:sticky lg:top-0 lg:h-screen">
+              <button type="button" onClick={goLanding} className="flex items-center gap-3 text-left">
+                <span className="grid h-11 w-11 place-items-center rounded-2xl border border-[color:var(--line)] bg-[var(--paper)] shadow-[0_10px_30px_rgba(32,27,24,0.08)]"><MonogramMark className="h-6 w-6" /></span>
+                <span><span className="block font-display text-lg leading-none tracking-[0.08em]">VigIA</span><span className="mt-1 block text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Painel operacional</span></span>
               </button>
-            </div>
-          </header>
 
-          {banner ? <div className="reveal mt-4 rounded-[24px] border border-[rgba(47,125,87,0.2)] bg-[rgba(47,125,87,0.08)] px-4 py-3 text-sm text-[#236444]">{banner}</div> : null}
-          {dashboardError ? <div className="reveal mt-4 rounded-[24px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120]">{dashboardError}</div> : null}
-
-          <section className="reveal mt-6 rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.82)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]" style={{ animationDelay: '60ms' }}>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <SectionHeading
-                eyebrow="Operação"
-                title="Configuração operacional do tenant ativo"
-                description="Cada bloco abaixo deixa explícitos os IDs que o edge worker precisa enviar e o contexto ligado a regras e EPI."
-              />
-              <div className="rounded-[24px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3 text-right">
-                <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Tenant</p>
-                <p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization?.name ?? 'Organização ativa'}</p>
-                <p className="text-xs text-[var(--muted)]">{operationsCatalog ? 'Catálogo carregado' : operationsLoading ? 'Carregando catálogo…' : 'Catálogo indisponível'}</p>
+              <div className="mt-8 space-y-2">
+                {workspaceNavItems.map((item) => {
+                  const active = item.id === workspaceSection
+                  return (
+                    <button key={item.id} type="button" onClick={() => openWorkspaceSection(item.id)} className={`w-full rounded-[22px] border px-4 py-3 text-left transition ${active ? 'border-[rgba(193,85,43,0.26)] bg-[rgba(193,85,43,0.08)] shadow-[0_12px_30px_rgba(193,85,43,0.08)]' : 'border-transparent bg-transparent hover:border-[color:var(--line)] hover:bg-[rgba(255,255,255,0.6)]'}`}>
+                      <span className="block text-[15px] font-medium text-[var(--ink)]">{item.label}</span>
+                      <span className="mt-1 block text-[11px] uppercase tracking-[0.22em] text-[var(--muted)]">{item.hint}</span>
+                    </button>
+                  )
+                })}
               </div>
-            </div>
 
-            {operationsError ? (
-              <div className="mt-5 rounded-[24px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120]">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p>{operationsError}</p>
-                  <button type="button" onClick={() => meData && void hydrateLiveDashboard(meData, selectedIncidentId ?? undefined)} className="font-medium text-[var(--ink)] underline decoration-[rgba(32,27,24,0.3)] underline-offset-4 transition hover:opacity-80">
-                    Tentar atualizar
-                  </button>
+              <div className="mt-auto rounded-[28px] border border-[color:var(--line)] bg-[var(--paper)] p-4 shadow-[0_16px_40px_rgba(32,27,24,0.06)]">
+                <p className="font-mono-ui text-[10px] uppercase tracking-[0.28em] text-[var(--muted)]">Contexto</p>
+                <p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization?.name ?? 'Organização ativa'}</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">{meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
+                <p className="mt-3 text-xs uppercase tracking-[0.24em] text-[var(--muted)]">{liveLabel}</p>
+              </div>
+            </aside>
+
+            {mobileNavOpen ? (
+              <div className="fixed inset-0 z-40 lg:hidden">
+                <button type="button" aria-label="Fechar navegação" onClick={() => setMobileNavOpen(false)} className="absolute inset-0 bg-[rgba(32,27,24,0.38)]" />
+                <div className="absolute left-0 top-0 h-full w-[min(86vw,20rem)] overflow-y-auto border-r border-[color:var(--line)] bg-[rgba(245,243,239,0.98)] px-4 py-4 shadow-[0_24px_80px_rgba(32,27,24,0.2)]">
+                  <div className="flex items-center justify-between">
+                    <button type="button" onClick={goLanding} className="flex items-center gap-3 text-left"><MonogramMark className="h-8 w-8" /><span className="font-display text-lg">VigIA</span></button>
+                    <button type="button" onClick={() => setMobileNavOpen(false)} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Fechar</button>
+                  </div>
+                  <div className="mt-5 space-y-2">{workspaceNavItems.map((item) => { const active = item.id === workspaceSection; return <button key={item.id} type="button" onClick={() => openWorkspaceSection(item.id)} className={`w-full rounded-[22px] border px-4 py-3 text-left transition ${active ? 'border-[rgba(193,85,43,0.26)] bg-[rgba(193,85,43,0.08)]' : 'border-transparent bg-transparent hover:border-[color:var(--line)] hover:bg-white/70'}`}><span className="block text-[15px] font-medium">{item.label}</span><span className="mt-1 block text-[11px] uppercase tracking-[0.22em] text-[var(--muted)]">{item.hint}</span></button> })}</div>
+                  <div className="mt-5 rounded-[24px] border border-[color:var(--line)] bg-[var(--paper)] p-4"><p className="font-mono-ui text-[10px] uppercase tracking-[0.28em] text-[var(--muted)]">Contexto</p><p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization?.name ?? 'Organização ativa'}</p><p className="mt-1 text-sm text-[var(--muted)]">{meData?.user.full_name ?? meData?.user.email ?? '—'}</p></div>
                 </div>
               </div>
             ) : null}
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              {[
-                ['Sites', operationSites.length, 'site_id']
-                , ['Câmeras', operationCameras.length, 'camera_id']
-                , ['Zonas', operationZones.length, 'zone_id']
-                , ['Regras', operationRules.length, 'safety_rule']
-                , ['EPI', operationPpe.length, 'required_ppe']
-              ].map(([label, value, hint]) => (
-                <article key={label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-4">
-                  <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">{label}</p>
-                  <p className="mt-3 font-display text-3xl text-[var(--ink)]">{String(value)}</p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.22em] text-[var(--muted)]">{hint}</p>
-                </article>
-              ))}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <header className="sticky top-0 z-30 border-b border-[color:var(--line)] bg-[rgba(245,243,239,0.9)] backdrop-blur-sm">
+                <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+                  <div className="flex items-center gap-3">
+                    <button type="button" onClick={() => setMobileNavOpen(true)} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)] lg:hidden">Menu</button>
+                    <div>
+                      <p className="font-mono-ui text-[10px] uppercase tracking-[0.28em] text-[var(--accent)]">{activeWorkspaceItem.label}</p>
+                      <p className="mt-1 text-sm text-[var(--muted)]">{activeWorkspaceItem.hint}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.6)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{liveLabel}</span>
+                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.6)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{activeOrganization?.name ?? 'Organização ativa'}</span>
+                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.6)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{meData?.user.full_name ?? meData?.user.email ?? 'Usuário'}</span>
+                    <button type="button" onClick={logout} className="rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-medium text-[var(--paper)] transition hover:-translate-y-0.5 hover:bg-[var(--ink-soft)]">Sair</button>
+                  </div>
+                </div>
+              </header>
+
+              {banner ? <div className="mx-4 mt-4 rounded-[24px] border border-[rgba(47,125,87,0.2)] bg-[rgba(47,125,87,0.08)] px-4 py-3 text-sm text-[#236444] sm:mx-6 lg:mx-8">{banner}</div> : null}
+              {dashboardError ? <div className="mx-4 mt-4 rounded-[24px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120] sm:mx-6 lg:mx-8">{dashboardError}</div> : null}
+              {operationsError ? <div className="mx-4 mt-4 rounded-[24px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120] sm:mx-6 lg:mx-8"><div className="flex flex-wrap items-center justify-between gap-3"><p>{operationsError}</p><button type="button" onClick={() => meData && void hydrateLiveDashboard(meData, selectedIncidentId ?? undefined)} className="font-medium text-[var(--ink)] underline decoration-[rgba(32,27,24,0.3)] underline-offset-4 transition hover:opacity-80">Tentar atualizar</button></div></div> : null}
+
+              <main className="flex-1 px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+                <div className="mx-auto max-w-[1440px]">{renderWorkspaceContent()}</div>
+              </main>
             </div>
-
-            {operationsLoading && !operationsCatalog ? (
-              <div className="mt-6 rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">
-                Carregando configuração operacional…
-              </div>
-            ) : operationSites.length === 0 ? (
-              <div className="mt-6 rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6">
-                <div className="max-w-2xl space-y-3">
-                  <p className="font-display text-2xl text-[var(--ink)]">Nenhum site configurado para este tenant.</p>
-                  <p className="text-sm leading-7 text-[var(--muted)]">Para preparar o piloto, cadastre um site, conecte ao menos uma câmera, desenhe as zonas e associe as regras e os EPIs. O worker só consegue operar com <span className="font-medium text-[var(--ink)]">site_id</span>, <span className="font-medium text-[var(--ink)]">camera_id</span> e <span className="font-medium text-[var(--ink)]">zone_id</span> válidos.</p>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {['Criar site', 'Vincular câmera', 'Desenhar zona', 'Ligar regra e EPI'].map((step, index) => (
-                      <div key={step} className="rounded-[22px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3 text-sm text-[var(--ink)]">
-                        <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Passo {index + 1}</p>
-                        <p className="mt-2">{step}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-6 grid gap-4 xl:grid-cols-2">
-                {operationSites.map((site) => {
-                  const siteCameras = operationCameras.filter((camera) => camera.site_id === site.id)
-                  const siteZones = operationZones.filter((zone) => zone.site_id === site.id)
-                  const siteRules = operationRules.filter((rule) => rule.site_id === site.id || (rule.zone_id ? siteZones.some((zone) => zone.id === rule.zone_id) : false))
-                  const sitePpe = operationPpe.filter((item) => item.site_id === site.id || (item.zone_id ? siteZones.some((zone) => zone.id === item.zone_id) : false))
-
-                  return (
-                    <article key={site.id} className="rounded-[30px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-5 shadow-[0_16px_40px_rgba(32,27,24,0.06)]">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">site_id</p>
-                          <h3 className="mt-2 font-display text-2xl text-[var(--ink)]">{site.name}</h3>
-                          <p className="mt-2 text-sm text-[var(--muted)]">{site.id}{site.address ? ` · ${site.address}` : ''}</p>
-                        </div>
-                        <OperationStatusPill status={site.status} />
-                      </div>
-
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3">
-                          <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Câmeras</p>
-                          <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteCameras.length}</p>
-                        </div>
-                        <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3">
-                          <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Zonas</p>
-                          <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteZones.length}</p>
-                        </div>
-                        <div className="rounded-[20px] border border-[color:var(--line)] bg-[var(--paper)] p-3">
-                          <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">Regras / EPI</p>
-                          <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{siteRules.length} / {sitePpe.length}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 space-y-4">
-                        <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-display text-lg text-[var(--ink)]">Câmeras vinculadas</p>
-                            <p className="font-mono-ui text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">camera_id · site_id</p>
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {siteCameras.length === 0 ? (
-                              <p className="text-sm text-[var(--muted)]">Nenhuma câmera vinculada a este site.</p>
-                            ) : siteCameras.map((camera) => (
-                              <div key={camera.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3">
-                                <div>
-                                  <p className="font-medium text-[var(--ink)]">{camera.name}</p>
-                                  <p className="mt-1 text-xs text-[var(--muted)]">{camera.id} · {camera.site_id}</p>
-                                </div>
-                                <OperationStatusPill status={camera.status} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-display text-lg text-[var(--ink)]">Zonas e worker IDs</p>
-                            <p className="font-mono-ui text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">zone_id · camera_id</p>
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {siteZones.length === 0 ? (
-                              <p className="text-sm text-[var(--muted)]">Nenhuma zona cadastrada para este site.</p>
-                            ) : siteZones.map((zone) => (
-                              <div key={zone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3">
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <p className="font-medium text-[var(--ink)]">{zone.id}</p>
-                                    <ZoneTypePill zoneType={zone.zone_type} />
-                                  </div>
-                                  <p className="mt-1 text-xs text-[var(--muted)]">camera_id {zone.camera_id} · site_id {zone.site_id}</p>
-                                </div>
-                                <OperationStatusPill status={zone.status} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
-                            <p className="font-display text-lg text-[var(--ink)]">Regras associadas</p>
-                            <div className="mt-3 space-y-2">
-                              {siteRules.length === 0 ? (
-                                <p className="text-sm text-[var(--muted)]">Sem regra ligada a este site.</p>
-                              ) : siteRules.map((rule) => (
-                                <div key={rule.id} className="rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="font-medium text-[var(--ink)]">{rule.name}</p>
-                                    <OperationStatusPill status={rule.status} />
-                                  </div>
-                                  <p className="mt-1 text-xs text-[var(--muted)]">rule_id {rule.id}{rule.zone_id ? ` · zone_id ${rule.zone_id}` : ''}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] p-4">
-                            <p className="font-display text-lg text-[var(--ink)]">EPI requerido</p>
-                            <div className="mt-3 space-y-2">
-                              {sitePpe.length === 0 ? (
-                                <p className="text-sm text-[var(--muted)]">Sem EPI configurado para este site.</p>
-                              ) : sitePpe.map((item) => (
-                                <div key={item.id} className="rounded-[18px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="font-medium text-[var(--ink)]">{item.item}</p>
-                                    <OperationStatusPill status={item.status} />
-                                  </div>
-                                  <p className="mt-1 text-xs text-[var(--muted)]">ppe_id {item.id} · rule_id {item.rule_id}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="mt-6 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-            <div className="space-y-6">
-              <section className="reveal rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.8)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]" style={{ animationDelay: '80ms' }}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--muted)]">{activeOrganization ? activeOrganization.name : 'Organização ativa'}</p>
-                    <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Dashboard conectado à API</h1>
-                    <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">A lista abaixo vem da organização ativa. Se a API falhar, o painel entra em demonstração local sem quebrar a navegação.</p>
-                  </div>
-                  <div className="rounded-[24px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3 text-right">
-                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Sessão</p>
-                    <p className="mt-2 font-display text-lg text-[var(--ink)]">{meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
-                    <p className="text-xs text-[var(--muted)]">{meData?.user.email ?? '—'}</p>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  {statusSummary.map((item) => (
-                    <article key={item.label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-4">
-                      <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">{item.label}</p>
-                      <p className="mt-3 font-display text-3xl text-[var(--ink)]">{item.value}</p>
-                    </article>
-                  ))}
-                </div>
-
-                {dashboardLoading ? <p className="mt-5 text-sm text-[var(--muted)]">Atualizando dados do painel…</p> : null}
-              </section>
-
-              <section className="reveal rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.8)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]" style={{ animationDelay: '140ms' }}>
-                <SectionHeading eyebrow="Incidentes" title="Lista operacional" description="Selecione um incidente para ver o detalhe completo, auditoria e ações disponíveis." />
-
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] px-3 py-1">{incidentSummary.total} registros</span>
-                    {hasActiveIncidentFilters ? <span className="rounded-full border border-[rgba(193,85,43,0.18)] bg-[rgba(193,85,43,0.08)] px-3 py-1 text-[#9e4120]">Filtros ativos</span> : null}
-                    {dashboardLoading ? <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] px-3 py-1">Atualizando…</span> : null}
-                  </div>
-                  <button type="button" onClick={resetIncidentFilters} className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">
-                    Limpar filtros
-                  </button>
-                </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Status</span>
-                    <select value={incidentFilters.status} onChange={(event) => updateIncidentFilters({ status: event.target.value as IncidentStatus | 'all' })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
-                      <option value="all">Todos</option>
-                      <option value="open">Aberto</option>
-                      <option value="acknowledged">Reconhecido</option>
-                      <option value="resolved">Resolvido</option>
-                      <option value="dismissed">Descartado</option>
-                    </select>
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Severidade</span>
-                    <select value={incidentFilters.severity} onChange={(event) => updateIncidentFilters({ severity: event.target.value })} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
-                      <option value="all">Todas</option>
-                      {Array.from(new Set(['high', 'medium', 'low', ...incidents.map((incident) => incident.severity.toLowerCase())]))
-                        .filter((value, index, list) => list.indexOf(value) === index)
-                        .map((value) => (
-                          <option key={value} value={value} className="capitalize">
-                            {value === 'high' ? 'Alta' : value === 'medium' ? 'Média' : value === 'low' ? 'Baixa' : value}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Site</span>
-                    <select value={incidentFilters.siteId} onChange={(event) => updateIncidentFilters({ siteId: event.target.value, cameraId: 'all', zoneId: 'all' })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
-                      <option value="all">Todos</option>
-                      {filteredSiteOptions.map((site) => (
-                        <option key={site.id} value={site.id}>{site.name} · {site.id}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Câmera</span>
-                    <select value={incidentFilters.cameraId} onChange={(event) => updateIncidentFilters({ cameraId: event.target.value, zoneId: 'all' })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
-                      <option value="all">Todas</option>
-                      {filteredCameraOptions.map((camera) => (
-                        <option key={camera.id} value={camera.id}>{camera.name} · {camera.id}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Zona</span>
-                    <select value={incidentFilters.zoneId} onChange={(event) => updateIncidentFilters({ zoneId: event.target.value })} disabled={operationsLoading && !operationsCatalog} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]">
-                      <option value="all">Todas</option>
-                      {filteredZoneOptions.map((zone) => (
-                        <option key={zone.id} value={zone.id}>{zone.id} · {zone.zone_type}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Período</span>
-                    <select
-                      value={incidentFilters.period}
-                      onChange={(event) => {
-                        const period = event.target.value as IncidentPeriod
-                        if (period === 'all') {
-                          updateIncidentFilters({ period: 'all', createdFrom: '', createdTo: '' })
-                          return
-                        }
-                        if (period === 'custom') {
-                          const fallback = getPresetRange('7d')
-                          updateIncidentFilters({
-                            period: 'custom',
-                            createdFrom: formatDateInput(incidentFilters.createdFrom) || fallback.createdFrom.slice(0, 10),
-                            createdTo: formatDateInput(incidentFilters.createdTo) || fallback.createdTo.slice(0, 10),
-                          })
-                          return
-                        }
-                        updateIncidentFilters({ period })
-                      }}
-                      className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]"
-                    >
-                      <option value="all">Todo o período</option>
-                      <option value="24h">Últimas 24h</option>
-                      <option value="7d">Últimos 7 dias</option>
-                      <option value="30d">Últimos 30 dias</option>
-                      <option value="custom">Personalizado</option>
-                    </select>
-                  </label>
-                </div>
-
-                {incidentFilters.period === 'custom' ? (
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <label className="block space-y-2">
-                      <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Criado de</span>
-                      <input
-                        type="date"
-                        value={formatDateInput(incidentFilters.createdFrom)}
-                        onChange={(event) => updateIncidentFilters({ period: 'custom', createdFrom: event.target.value })}
-                        className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]"
-                      />
-                    </label>
-                    <label className="block space-y-2">
-                      <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Criado até</span>
-                      <input
-                        type="date"
-                        value={formatDateInput(incidentFilters.createdTo)}
-                        onChange={(event) => updateIncidentFilters({ period: 'custom', createdTo: event.target.value })}
-                        className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.72)] px-3 py-3 text-sm text-[var(--ink)] outline-none transition focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.12)]"
-                      />
-                    </label>
-                  </div>
-                ) : null}
-
-                <div className="mt-6 space-y-3">
-                  {dashboardLoading && incidents.length === 0 ? (
-                    <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">
-                      Carregando incidentes…
-                    </div>
-                  ) : incidents.length === 0 ? (
-                    <div className="rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-6 text-sm text-[var(--muted)]">
-                      {hasActiveIncidentFilters ? (
-                        <div className="space-y-2">
-                          <p className="font-display text-2xl text-[var(--ink)]">Nenhum incidente encontrou esses filtros.</p>
-                          <p>Revise status, severidade, site, câmera, zona ou período para voltar a ver eventos.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <p className="font-display text-2xl text-[var(--ink)]">Nenhum incidente registrado para esta organização.</p>
-                          <p>Quando o worker começar a enviar eventos, eles aparecerão aqui com triagem, contexto e auditoria.</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    incidents.map((incident) => (
-                      <button
-                        key={incident.id}
-                        type="button"
-                        onClick={() => activeOrganization && void loadIncidentContext(activeOrganization.id, incident.id)}
-                        className={`w-full rounded-[28px] border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(32,27,24,0.08)] ${selectedIncidentId === incident.id ? 'border-[rgba(193,85,43,0.35)] bg-[rgba(193,85,43,0.06)]' : 'border-[color:var(--line)] bg-[rgba(255,255,255,0.55)]'}`}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-display text-xl text-[var(--ink)]">{incident.summary}</p>
-                              <StatusPill status={incident.status} />
-                            </div>
-                            <p className="mt-2 text-sm text-[var(--muted)]">
-                              {incident.site_id ?? 'Site não informado'} · {incident.camera_id} · Zona {incident.zone_id}
-                            </p>
-                          </div>
-                          <SeverityPill severity={incident.severity} />
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-
-            <div className="space-y-6">
-              <section className="reveal rounded-[34px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-6 text-[var(--paper)] shadow-[0_26px_80px_rgba(32,27,24,0.18)]" style={{ animationDelay: '120ms' }}>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[rgba(245,243,239,0.7)]">Detalhe do incidente</p>
-                    <h2 className="mt-3 font-display text-3xl leading-tight">{selectedIncident?.summary ?? 'Selecione um incidente'}</h2>
-                  </div>
-                  {selectedIncident ? <StatusPill status={selectedIncident.status} /> : null}
-                </div>
-
-                {selectedIncident ? (
-                  <div className="mt-6 space-y-5 text-sm leading-7 text-[rgba(245,243,239,0.82)]">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                        <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Site</p>
-                        <p className="mt-2 font-display text-lg text-[var(--paper)]">{selectedIncident.site_id ?? '—'}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                        <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Câmera</p>
-                        <p className="mt-2 font-display text-lg text-[var(--paper)]">{selectedIncident.camera_id}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                        <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Severidade</p>
-                        <p className="mt-2 font-display text-lg text-[var(--paper)] capitalize">{selectedIncident.severity}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                        <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[rgba(245,243,239,0.65)]">Atualizado</p>
-                        <p className="mt-2 font-display text-lg text-[var(--paper)]">{formatTimestamp(selectedIncident.updated_at)}</p>
-                      </div>
-                    </div>
-
-                    <EvidenceExplorer
-                      incident={selectedIncident}
-                      organizationName={activeOrganization?.name ?? null}
-                      evidenceItems={evidenceItems}
-                      selectedEvidence={selectedEvidence}
-                      evidenceLoading={evidenceLoading}
-                      evidenceError={evidenceError}
-                      evidenceDownloadUrl={evidenceDownloadUrl}
-                      evidenceDownloadLoading={evidenceDownloadLoading}
-                      evidenceDownloadError={evidenceDownloadError}
-                      onSelectEvidence={selectEvidence}
-                      onOpenEvidence={() => void openSelectedEvidence()}
-                      onRetry={() => void loadEvidenceContext(activeOrganization?.id ?? selectedIncident.organization_id, selectedIncident.id)}
-                    />
-
-                    <div className="grid gap-3 rounded-[28px] border border-white/10 bg-white/5 p-4 text-[rgba(245,243,239,0.84)] sm:grid-cols-2">
-                      <p><span className="text-[rgba(245,243,239,0.6)]">Criado:</span> {formatTimestamp(selectedIncident.created_at)}</p>
-                      <p><span className="text-[rgba(245,243,239,0.6)]">Reconhecido:</span> {formatTimestamp(selectedIncident.acknowledged_at)}</p>
-                      <p><span className="text-[rgba(245,243,239,0.6)]">Resolvido:</span> {formatTimestamp(selectedIncident.resolved_at)}</p>
-                      <p><span className="text-[rgba(245,243,239,0.6)]">Descartado:</span> {formatTimestamp(selectedIncident.dismissed_at)}</p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-3 pt-2">
-                      <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('acknowledge')} className="rounded-full bg-[var(--accent)] px-5 py-3 font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.28)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60">
-                        {actionBusy === 'acknowledge' ? 'Reconhecendo…' : 'Reconhecer'}
-                      </button>
-                      <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('resolve')} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 font-medium text-[var(--paper)] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">
-                        {actionBusy === 'resolve' ? 'Resolvendo…' : 'Resolver'}
-                      </button>
-                      <button type="button" disabled={actionBusy !== null} onClick={() => void handleAction('dismiss')} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 font-medium text-[var(--paper)] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">
-                        {actionBusy === 'dismiss' ? 'Descartando…' : 'Descartar'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-6 text-sm leading-7 text-[rgba(245,243,239,0.72)]">Nenhum incidente selecionado.</p>
-                )}
-              </section>
-
-              <section className="reveal rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.8)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]" style={{ animationDelay: '200ms' }}>
-                <SectionHeading eyebrow="Auditoria" title="Trilha de eventos" description="Cada mudança relevante fica visível para revisão rápida." />
-                <div className="mt-6 space-y-3">
-                  {auditLog.length === 0 ? (
-                    <div className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.55)] p-5 text-sm text-[var(--muted)]">Sem registros de auditoria para este incidente.</div>
-                  ) : (
-                    auditLog.map((entry) => (
-                      <article key={entry.id} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="font-display text-lg text-[var(--ink)]">{entry.action}</p>
-                            <p className="mt-1 text-sm text-[var(--muted)]">{entry.actor} · {formatTimestamp(entry.created_at)}</p>
-                          </div>
-                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{entry.from_status ?? '—'} → {entry.to_status}</p>
-                        </div>
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-          </section>
-
-          <footer className="reveal mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-[color:var(--line)] py-6 text-sm text-[var(--muted)]" style={{ animationDelay: '280ms' }}>
-            <p>VigIA Safety · {activeOrganization?.name ?? 'Painel operacional'} · {liveLabel}</p>
-            <button type="button" onClick={() => void activateDemo('Modo demonstração local reativado manualmente.')} className="font-medium text-[var(--ink)] transition hover:text-[var(--accent)]">
-              Reativar demonstração
-            </button>
-          </footer>
+          </div>
         </div>
       )}
 
