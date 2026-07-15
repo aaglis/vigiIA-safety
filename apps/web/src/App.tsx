@@ -363,12 +363,17 @@ const navItems = [
   { label: 'Segurança', id: 'seguranca' },
 ] as const
 
-const palette = [
-  { name: '#201B18', value: '#201B18', note: 'Base e contraste' },
-  { name: '#C1552B', value: '#C1552B', note: 'Acento principal' },
-  { name: '#F5F3EF', value: '#F5F3EF', note: 'Fundo de papel' },
-  { name: '#2F7D57', value: '#2F7D57', note: 'Estado positivo' },
-  { name: '#C98A2B', value: '#C98A2B', note: 'Avisos e calor' },
+const flowSteps = [
+  { title: 'Detecção na borda', text: 'Edge workers leem câmeras e enviam apenas eventos de risco — sem vídeo contínuo.' },
+  { title: 'Triagem no dashboard', text: 'O evento vira incidente priorizado e chega à equipe certa para resposta rápida.' },
+  { title: 'Registro auditável', text: 'Ação, evidência e histórico ficam registrados para auditoria e conformidade.' },
+] as const
+
+const securityPoints = [
+  { title: 'Sem reconhecimento facial', text: 'Nenhuma identificação biométrica no MVP.' },
+  { title: 'Sem vídeo contínuo', text: 'Apenas eventos e evidências curtas quando necessário.' },
+  { title: 'Evidências privadas', text: 'Isoladas por organização, com URLs assinadas e auditoria de acesso.' },
+  { title: 'Auditoria completa', text: 'Trilha de ações sensíveis e retenção configurável por organização.' },
 ] as const
 
 const features = [
@@ -387,12 +392,6 @@ const features = [
     title: 'Rastro limpo para conformidade',
     description: 'Eventos organizados, decisões rastreáveis e histórico pronto para revisão.',
   },
-] as const
-
-const steps = [
-  'A visão computacional identifica áreas críticas e sinais de atenção.',
-  'O sistema prioriza o evento e encaminha para a equipe certa.',
-  'Toda ação fica registrada para auditoria e melhoria contínua.',
 ] as const
 
 type IncidentPeriod = 'all' | '24h' | '7d' | '30d' | 'custom'
@@ -549,12 +548,29 @@ function incidentFiltersToParams(filters: IncidentFilters) {
   }
 }
 
-function MonogramMark({ className = '' }: { className?: string }) {
+function MonogramMark({ className = '', variant = 'default' }: { className?: string; variant?: 'default' | 'reverse' }) {
+  const outline = variant === 'reverse' ? '#F5F3EF' : '#201B18'
+  const inner = variant === 'reverse' ? '#E07A4E' : '#C1552B'
   return (
     <svg viewBox="0 0 120 120" className={className} aria-hidden="true">
-      <rect x="9" y="9" width="102" height="102" rx="22" fill="none" stroke="currentColor" strokeWidth="8" />
-      <rect x="39" y="39" width="42" height="42" rx="8" fill="currentColor" />
+      <rect x="10" y="10" width="100" height="100" rx="28" fill="none" stroke={outline} strokeWidth="9" />
+      <rect x="42" y="42" width="36" height="36" rx="7" fill={inner} />
     </svg>
+  )
+}
+
+function Logo({ markClassName = 'h-9 w-9', size = 'md', variant = 'default' }: { markClassName?: string; size?: 'sm' | 'md' | 'lg'; variant?: 'default' | 'reverse' }) {
+  const vigiaSize = size === 'lg' ? 'text-2xl' : size === 'sm' ? 'text-[15px]' : 'text-lg'
+  const safetySize = size === 'lg' ? 'text-[11px]' : 'text-[8px]'
+  const vigiaColor = variant === 'reverse' ? 'text-[var(--paper)]' : 'text-[var(--ink)]'
+  return (
+    <span className="flex items-center gap-2.5">
+      <MonogramMark className={markClassName} variant={variant} />
+      <span className="flex flex-col leading-none">
+        <span className={`font-semibold tracking-[0.03em] ${vigiaSize} ${vigiaColor}`}>VIGIA</span>
+        <span className={`mt-1 font-mono-ui uppercase tracking-[0.34em] text-[var(--label)] ${safetySize}`}>SAFETY</span>
+      </span>
+    </span>
   )
 }
 
@@ -1402,292 +1418,166 @@ export default function App() {
   const liveLabel = mode === 'live' ? 'Conectado à API' : mode === 'demo' ? 'Modo demonstração local' : 'Aguardando conexão'
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(193,85,43,0.12),_transparent_35%),radial-gradient(circle_at_80%_20%,_rgba(47,125,87,0.12),_transparent_30%),linear-gradient(180deg,_rgba(255,255,255,0.32),_transparent_18%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(32,27,24,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(32,27,24,0.03)_1px,transparent_1px)] bg-[size:72px_72px] opacity-30 [mask-image:linear-gradient(180deg,black,transparent_92%)]" />
-
+    <main className="relative min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       {screen === 'landing' && (
-        <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 pb-14 pt-5 sm:px-6 lg:px-8">
-          <header className="reveal relative flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] px-4 py-4 shadow-[0_20px_60px_rgba(32,27,24,0.08)] backdrop-blur-sm sm:px-5">
-            <button type="button" onClick={() => scrollToSection('top')} className="flex items-center gap-3 text-left">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-[color:var(--line)] bg-[var(--paper)] text-[var(--ink)] shadow-[0_10px_30px_rgba(32,27,24,0.08)]">
-                <MonogramMark className="h-6 w-6" />
-              </span>
-              <span>
-                <span className="block font-display text-lg leading-none tracking-[0.08em]">VigIA</span>
-                <span className="mt-1 block text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Safety operacional</span>
-              </span>
+        <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 sm:px-6 lg:px-8">
+          <header className="reveal flex items-center justify-between gap-4 border-b border-[color:var(--line)] py-5">
+            <button type="button" onClick={() => scrollToSection('top')} className="text-left">
+              <Logo size="md" markClassName="h-9 w-9" />
             </button>
 
-            <nav className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+            <nav className="hidden items-center gap-8 text-[15px] text-[#57524b] md:flex">
               {navItems.map((item) => (
-                <button key={item.id} type="button" onClick={() => scrollToSection(item.id)} className="rounded-full px-4 py-2 transition hover:bg-[rgba(32,27,24,0.06)] hover:text-[var(--ink)]">
+                <button key={item.id} type="button" onClick={() => scrollToSection(item.id)} className="transition hover:text-[var(--ink)]">
                   {item.label}
                 </button>
               ))}
-              <button type="button" onClick={() => setScreen('login')} className="rounded-full border border-[color:var(--line)] bg-[var(--ink)] px-4 py-2 font-medium text-[var(--paper)] shadow-[0_12px_30px_rgba(32,27,24,0.18)] transition hover:-translate-y-0.5 hover:bg-[var(--ink-soft)]">
+            </nav>
+
+            <div className="flex items-center gap-3 sm:gap-5">
+              <button type="button" onClick={() => setScreen('login')} className="text-[15px] font-medium text-[var(--ink)] transition hover:text-[var(--accent)]">
                 Entrar
               </button>
-            </nav>
+              <button type="button" onClick={() => setScreen('login')} className="rounded-lg bg-[var(--ink)] px-4 py-2.5 text-[15px] font-medium text-[var(--paper)] transition hover:bg-[var(--ink-soft)]">
+                Solicitar demonstração
+              </button>
+            </div>
           </header>
 
-          <section id="top" className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:py-16">
-            <div className="space-y-8">
-              <div className="reveal inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[rgba(245,243,239,0.8)] px-4 py-2 text-[11px] uppercase tracking-[0.3em] text-[var(--muted)] shadow-[0_10px_30px_rgba(32,27,24,0.06)]">
-                <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-                Segurança do trabalho · visão computacional
-              </div>
-
-              <div className="reveal space-y-5" style={{ animationDelay: '120ms' }}>
-                <h1 className="max-w-3xl font-display text-5xl leading-[0.95] tracking-[-0.04em] text-[var(--ink)] sm:text-6xl lg:text-7xl">Enxergue o risco antes do acidente.</h1>
-                <p className="max-w-2xl text-base leading-8 text-[var(--muted)] sm:text-lg">
-                  A VigIA Safety combina leitura visual, triagem de eventos e acesso controlado para proteger pessoas, processos e operações sem complicar a rotina.
-                </p>
-              </div>
-
-              <div className="reveal flex flex-wrap gap-3" style={{ animationDelay: '220ms' }}>
-                <button type="button" onClick={() => scrollToSection('produto')} className="rounded-full bg-[var(--accent)] px-6 py-3 font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.28)] transition hover:-translate-y-0.5 hover:brightness-105">
-                  Ver como funciona
-                </button>
-                <button type="button" onClick={() => setScreen('login')} className="rounded-full border border-[color:var(--line)] bg-[rgba(245,243,239,0.72)] px-6 py-3 font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-[rgba(255,255,255,0.82)]">
-                  Acessar plataforma
-                </button>
-              </div>
-
-              <div className="reveal grid gap-3 sm:grid-cols-3" style={{ animationDelay: '300ms' }}>
-                {[
-                  ['Tempo real', 'alertas e revisão rápida'],
-                  ['Acesso restrito', 'usuários autorizados'],
-                  ['Auditoria', 'histórico claro de ações'],
-                ].map(([title, text]) => (
-                  <article key={title} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.74)] p-4 shadow-[0_16px_40px_rgba(32,27,24,0.06)]">
-                    <p className="font-display text-base text-[var(--ink)]">{title}</p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{text}</p>
-                  </article>
-                ))}
-              </div>
-            </div>
-
-            <div className="reveal relative" style={{ animationDelay: '180ms' }}>
-              <div className="absolute -left-6 top-10 hidden h-24 w-24 rounded-full bg-[rgba(201,138,43,0.14)] blur-2xl lg:block" />
-              <div className="absolute -right-4 bottom-6 hidden h-28 w-28 rounded-full bg-[rgba(47,125,87,0.14)] blur-2xl lg:block" />
-
-              <div className="relative overflow-hidden rounded-[36px] border border-[color:var(--line)] bg-[linear-gradient(180deg,rgba(245,243,239,0.95),rgba(245,243,239,0.82))] p-6 shadow-[0_30px_80px_rgba(32,27,24,0.12)]">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">VIGIA SAFETY · IDENTIDADE VISUAL · PAPER TERRACOTA</p>
-                    <h2 className="mt-3 font-display text-2xl text-[var(--ink)]">Sistema visual — direção escolhida</h2>
-                  </div>
-                  <div className="rounded-full border border-[color:var(--line)] px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">↺ repetir animação</div>
-                </div>
-
-                <div className="mt-6 grid gap-4 sm:grid-cols-[1fr_0.9fr]">
-                  <div className="rounded-[28px] border border-[color:var(--line)] bg-[var(--paper)] p-6">
-                    <div className="flex items-center gap-4">
-                      <div className="grid h-24 w-24 place-items-center rounded-[28px] border-[3px] border-[color:var(--ink)] bg-[var(--paper)] text-[var(--accent)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]">
-                        <MonogramMark className="h-14 w-14" />
-                      </div>
-                      <div>
-                        <p className="font-display text-4xl leading-none text-[var(--ink)]">VIGIA</p>
-                        <p className="mt-1 font-display text-2xl leading-none text-[var(--ink)]">SAFETY</p>
-                        <p className="mt-4 text-sm leading-6 text-[var(--muted)]">Monograma sólido, contraste forte e acento terracota para destacar ação.</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3">
-                    <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.52)] p-5">
-                      <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Tipografia</p>
-                      <p className="mt-3 font-display text-3xl text-[var(--ink)]">Bricolage Grotesque</p>
-                      <p className="mt-2 text-sm text-[var(--muted)]">Títulos</p>
-                      <p className="mt-3 text-sm text-[var(--muted)]">IBM Plex Sans · corpo &amp; interface</p>
-                      <p className="mt-1 font-mono-ui text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">IBM Plex Mono · rótulos &amp; métricas</p>
-                    </div>
-                    <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.52)] p-5">
-                      <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Cores</p>
-                      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                        {palette.map((color) => (
-                          <div key={color.value} className="space-y-2 text-[10px] text-[var(--muted)]">
-                            <div className="h-12 rounded-2xl border border-black/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]" style={{ background: color.value }} />
-                            <p className="font-mono-ui uppercase tracking-[0.18em]">{color.name}</p>
-                            <p className="text-[10px] leading-4 text-[var(--muted)]">{color.note}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-[28px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] px-5 py-4 text-[var(--paper)] shadow-[0_18px_40px_rgba(32,27,24,0.22)]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[rgba(245,243,239,0.68)]">vigiasafety.com</p>
-                      <p className="mt-2 font-display text-xl">Segurança operacional com linguagem clara.</p>
-                    </div>
-                    <button type="button" onClick={() => setScreen('login')} className="rounded-full bg-[var(--paper)] px-4 py-2 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5">
-                      Entrar
-                    </button>
-                  </div>
-                </div>
-              </div>
+          <section id="top" className="flex flex-1 flex-col items-center justify-center py-24 text-center lg:py-32">
+            <p className="reveal font-mono-ui text-xs uppercase tracking-[0.24em] text-[var(--muted-2)]">
+              Segurança do trabalho · visão computacional
+            </p>
+            <h1 className="reveal mt-8 max-w-[15ch] font-display text-5xl font-bold leading-[0.98] tracking-[-0.04em] text-[var(--ink)] sm:text-6xl lg:text-7xl" style={{ animationDelay: '120ms' }}>
+              Enxergue o risco antes do acidente
+            </h1>
+            <p className="reveal mt-7 max-w-[600px] text-lg leading-relaxed text-[var(--muted)] sm:text-xl" style={{ animationDelay: '220ms' }}>
+              Visão computacional na borda transforma eventos de risco em incidentes auditáveis — com evidências privadas e isolamento por organização.
+            </p>
+            <div className="reveal mt-11 flex flex-wrap items-center justify-center gap-6" style={{ animationDelay: '320ms' }}>
+              <button type="button" onClick={() => setScreen('login')} className="rounded-lg bg-[var(--accent)] px-7 py-3.5 text-base font-semibold text-white transition hover:bg-[var(--accent-hover)]">
+                Solicitar demonstração
+              </button>
+              <button type="button" onClick={() => scrollToSection('como-funciona')} className="inline-flex items-center gap-2 text-base font-medium text-[var(--ink)] transition hover:text-[var(--accent)]">
+                Ver como funciona
+                <span className="font-mono-ui text-[var(--accent)]">→</span>
+              </button>
             </div>
           </section>
 
-          <section id="produto" className="grid gap-6 pb-10 pt-2 lg:grid-cols-3">
+          <section id="produto" className="grid gap-5 border-t border-[color:var(--line)] py-16 lg:grid-cols-3">
             {features.map((feature, index) => (
-              <article key={feature.title} className="reveal rounded-[30px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.76)] p-6 shadow-[0_16px_40px_rgba(32,27,24,0.06)]" style={{ animationDelay: `${120 * (index + 1)}ms` }}>
-                <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--accent)]">{feature.eyebrow}</p>
-                <h3 className="mt-3 font-display text-2xl text-[var(--ink)]">{feature.title}</h3>
-                <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{feature.description}</p>
+              <article key={feature.title} className="reveal rounded-2xl border border-[color:var(--line)] bg-[var(--card)] p-6" style={{ animationDelay: `${100 * (index + 1)}ms` }}>
+                <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">{feature.eyebrow}</p>
+                <h3 className="mt-3 font-display text-xl font-semibold text-[var(--ink)]">{feature.title}</h3>
+                <p className="mt-2.5 text-sm leading-6 text-[var(--muted)]">{feature.description}</p>
               </article>
             ))}
           </section>
 
-          <section id="como-funciona" className="grid gap-6 py-10 lg:grid-cols-[0.95fr_1.05fr]">
-            <div className="reveal rounded-[32px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-7 text-[var(--paper)] shadow-[0_26px_80px_rgba(32,27,24,0.18)]" style={{ animationDelay: '120ms' }}>
-              <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[rgba(245,243,239,0.7)]">vigiasafety.com/login</p>
-              <h3 className="mt-3 font-display text-3xl leading-tight">Acesso à plataforma de segurança operacional.</h3>
-              <p className="mt-4 max-w-md text-sm leading-7 text-[rgba(245,243,239,0.72)]">Uma entrada discreta, sem ruído visual, para equipes autorizadas que precisam consultar dados, agir rápido e manter o controle.</p>
-
-              <div className="mt-8 space-y-4">
-                {steps.map((step, index) => (
-                  <div key={step} className="flex gap-4 rounded-[24px] border border-white/10 bg-white/5 p-4">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent)] font-mono-ui text-xs text-[var(--paper)]">0{index + 1}</div>
-                    <p className="pt-1 text-sm leading-6 text-[rgba(245,243,239,0.84)]">{step}</p>
-                  </div>
-                ))}
-              </div>
+          <section id="como-funciona" className="border-t border-[color:var(--line)] py-16">
+            <div className="max-w-2xl">
+              <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">Como funciona</p>
+              <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] text-[var(--ink)] md:text-4xl">Da câmera ao incidente auditável</h2>
+              <p className="mt-4 text-base leading-7 text-[var(--muted)]">
+                Fluxo direto: detecção na borda, triagem no dashboard e registro completo para auditoria.
+              </p>
             </div>
+            <ol className="mt-10 grid gap-4 md:grid-cols-3">
+              {flowSteps.map((step, index) => (
+                <li key={step.title} className="reveal rounded-2xl border border-[color:var(--line)] bg-[var(--card)] p-6" style={{ animationDelay: `${100 * (index + 1)}ms` }}>
+                  <span className="font-mono-ui text-sm text-[var(--accent)]">0{index + 1}</span>
+                  <h3 className="mt-3 font-display text-lg font-semibold text-[var(--ink)]">{step.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{step.text}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
 
-            <div id="seguranca" className="reveal rounded-[32px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.76)] p-7 shadow-[0_22px_60px_rgba(32,27,24,0.08)]" style={{ animationDelay: '200ms' }}>
-              <SectionHeading eyebrow="Segurança" title="Copy direta, hierarquia limpa e contraste forte." description="A experiência foi transposta para um front em React com a mesma atmosfera do standalone: papel quente, contornos escuros e acentos terracota." />
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                {[
-                  ['Login real + demo', 'Credenciais demo e fallback local quando a API não responde.'],
-                  ['Dashboard conectado', 'Lista, detalhe, auditoria e ações via API.'],
-                  ['Estados claros', 'Loading, vazio, erro e ação em andamento.'],
-                  ['Sem dependências novas', 'React, Vite e Tailwind já existentes.'],
-                ].map(([title, text]) => (
-                  <article key={title} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.5)] p-5">
-                    <p className="font-display text-lg text-[var(--ink)]">{title}</p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{text}</p>
-                  </article>
-                ))}
-              </div>
+          <section id="seguranca" className="border-t border-[color:var(--line)] py-16">
+            <div className="max-w-2xl">
+              <p className="font-mono-ui text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">Segurança e privacidade</p>
+              <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] text-[var(--ink)] md:text-4xl">Feito para segurança do trabalho, não para vigilância</h2>
+              <p className="mt-4 text-base leading-7 text-[var(--muted)]">
+                Privacidade desde a fundação: mínimo necessário de dados, evidências isoladas por organização e trilha auditável.
+              </p>
+            </div>
+            <div className="mt-10 grid gap-4 sm:grid-cols-2">
+              {securityPoints.map((point) => (
+                <article key={point.title} className="rounded-2xl border border-[color:var(--line)] bg-[var(--card)] p-6">
+                  <h3 className="font-display text-lg font-semibold text-[var(--ink)]">{point.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{point.text}</p>
+                </article>
+              ))}
             </div>
           </section>
 
-          <footer className="reveal flex flex-wrap items-center justify-between gap-4 border-t border-[color:var(--line)] py-6 text-sm text-[var(--muted)]" style={{ animationDelay: '320ms' }}>
-            <p>VigIA Safety · Identidade visual aplicada ao frontend.</p>
+          <footer className="flex flex-col items-center gap-4 border-t border-[color:var(--line)] py-8 text-sm text-[var(--muted)] sm:flex-row sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <MonogramMark className="h-6 w-6" />
+              <span>VigIA Safety · segurança industrial assistida por visão computacional.</span>
+            </div>
             <button type="button" onClick={() => setScreen('login')} className="font-medium text-[var(--ink)] transition hover:text-[var(--accent)]">
-              Abrir login
+              Entrar
             </button>
           </footer>
         </div>
       )}
 
       {screen === 'login' && (
-        <div className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-5 py-6 sm:px-6 lg:px-8">
-          <div className="absolute inset-x-0 top-4 mx-auto flex w-full max-w-6xl justify-between px-5 sm:px-6 lg:px-8">
-            <button type="button" onClick={goLanding} className="flex items-center gap-3 text-left text-[var(--ink)]">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-[color:var(--line)] bg-[var(--paper)]">
-                <MonogramMark className="h-6 w-6" />
-              </span>
-              <span>
-                <span className="block font-display text-lg leading-none tracking-[0.08em]">VigIA</span>
-                <span className="mt-1 block text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Login</span>
-              </span>
-            </button>
-            <button type="button" onClick={goLanding} className="hidden rounded-full border border-[color:var(--line)] bg-[rgba(245,243,239,0.82)] px-4 py-2 text-sm font-medium text-[var(--ink)] transition hover:bg-[rgba(255,255,255,0.86)] sm:inline-flex">
-              Voltar à página inicial
+        <div className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-5 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-6">
+            <button type="button" onClick={goLanding} className="text-sm font-medium text-[var(--muted)] transition hover:text-[var(--ink)]">
+              ← Voltar à página inicial
             </button>
           </div>
 
-          <section className="grid w-full gap-6 pt-20 lg:grid-cols-[0.92fr_1.08fr]">
-            <div className="reveal rounded-[36px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-7 text-[var(--paper)] shadow-[0_30px_80px_rgba(32,27,24,0.18)]" style={{ animationDelay: '80ms' }}>
-              <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[rgba(245,243,239,0.68)]">SEGURANÇA DO TRABALHO · VISÃO COMPUTACIONAL</p>
-              <h1 className="mt-4 font-display text-4xl leading-[0.98] tracking-[-0.04em] sm:text-5xl">Entrar</h1>
-              <p className="mt-4 max-w-md text-sm leading-7 text-[rgba(245,243,239,0.76)]">Acesso restrito a usuários autorizados. Use suas credenciais para continuar na plataforma.</p>
+          <div className="flex flex-1 items-center justify-center pb-20">
+            <div className="reveal w-full max-w-[360px]">
+              <button type="button" onClick={goLanding} className="mx-auto mb-9 flex flex-col items-center gap-3">
+                <MonogramMark className="h-11 w-11" />
+                <span className="flex flex-col items-center leading-none">
+                  <span className="text-lg font-semibold tracking-[0.03em] text-[var(--ink)]">VIGIA</span>
+                  <span className="mt-1 font-mono-ui text-[8px] uppercase tracking-[0.34em] text-[var(--label)]">SAFETY</span>
+                </span>
+              </button>
 
-              <div className="mt-8 grid gap-3">
-                {['Monitoramento contínuo', 'Alertas operacionais', 'Registro de auditoria'].map((item) => (
-                  <div key={item} className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-[rgba(245,243,239,0.86)]">
-                    {item}
+              <h1 className="text-center font-display text-3xl font-bold tracking-[-0.02em] text-[var(--ink)]">Entrar</h1>
+              <p className="mt-1.5 text-center text-sm text-[var(--muted)]">Acesso à plataforma de segurança operacional.</p>
+
+              <form className="mt-8 space-y-4" onSubmit={(event) => { event.preventDefault(); void handleLogin() }}>
+                <div>
+                  <label htmlFor="login-email" className="mb-1.5 block text-[13px] font-medium text-[#403933]">E-mail</label>
+                  <input id="login-email" type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} className="h-12 w-full rounded-[10px] border border-[#dcd7cc] bg-[var(--card)] px-3.5 text-[15px] text-[var(--ink)] outline-none transition placeholder:text-[#a09a8e] focus:border-[var(--accent)] focus:ring-2 focus:ring-[rgba(193,85,43,0.16)]" placeholder="voce@empresa.com" />
+                </div>
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label htmlFor="login-password" className="text-[13px] font-medium text-[#403933]">Senha</label>
+                    <button type="button" className="text-[13px] text-[var(--accent)] transition hover:opacity-80">Esqueci minha senha</button>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="reveal rounded-[36px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.82)] p-5 shadow-[0_30px_80px_rgba(32,27,24,0.12)] backdrop-blur-sm sm:p-7" style={{ animationDelay: '150ms' }}>
-              <div className="grid gap-6 lg:grid-cols-[1fr_0.92fr]">
-                <div className="rounded-[28px] border border-[color:var(--line)] bg-[var(--paper)] p-6">
-                  <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--muted)]">vigiasafety.com/login</p>
-                  <h2 className="mt-3 font-display text-3xl text-[var(--ink)]">Acesso à plataforma de segurança operacional.</h2>
-                  <p className="mt-4 text-sm leading-7 text-[var(--muted)]">Faça login para consultar incidentes, acompanhar eventos e atuar com rapidez.</p>
-
-                  <form className="mt-6 space-y-4" onSubmit={(event) => { event.preventDefault(); void handleLogin() }}>
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-[var(--ink)]">E-mail</span>
-                      <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.75)] px-4 py-3 text-[var(--ink)] outline-none transition placeholder:text-[var(--muted)] focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.14)]" placeholder="voce@empresa.com" />
-                    </label>
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-[var(--ink)]">Senha</span>
-                      <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} className="w-full rounded-2xl border border-[color:var(--line)] bg-[rgba(255,255,255,0.75)] px-4 py-3 text-[var(--ink)] outline-none transition placeholder:text-[var(--muted)] focus:border-[rgba(193,85,43,0.55)] focus:ring-4 focus:ring-[rgba(193,85,43,0.14)]" placeholder="••••••••••" />
-                    </label>
-
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                      <button type="button" className="font-medium text-[var(--accent)] transition hover:opacity-80">Esqueci minha senha</button>
-                      <button type="submit" disabled={loginLoading} className="rounded-full bg-[var(--accent)] px-5 py-3 font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.28)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60">
-                        {loginLoading ? 'Entrando…' : 'Entrar'}
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-3 pt-2">
-                      <button type="button" onClick={() => void handleLogin({ email: 'admin@vigia.local', password: 'change-me-dev' })} className="rounded-full border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] px-4 py-2 text-sm font-medium text-[var(--ink)] transition hover:bg-white">
-                        Entrar com demo
-                      </button>
-                      <button type="button" onClick={() => void handleLogin({ forceDemo: true })} className="rounded-full border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] px-4 py-2 text-sm font-medium text-[var(--paper)] transition hover:bg-[var(--ink-soft)]">
-                        Modo demonstração local
-                      </button>
-                    </div>
-
-                    <p className="text-xs leading-6 text-[var(--muted)]">
-                      Credenciais demo: <span className="font-medium text-[var(--ink)]">admin@vigia.local</span> / <span className="font-medium text-[var(--ink)]">change-me-dev</span>
-                    </p>
-                    {loginError ? <p className="rounded-2xl border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120]">{loginError}</p> : null}
-                  </form>
+                  <input id="login-password" type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} className="h-12 w-full rounded-[10px] border border-[#dcd7cc] bg-[var(--card)] px-3.5 text-[15px] text-[var(--ink)] outline-none transition placeholder:text-[#a09a8e] focus:border-[var(--accent)] focus:ring-2 focus:ring-[rgba(193,85,43,0.16)]" placeholder="••••••••••" />
                 </div>
 
-                <div className="rounded-[28px] border border-[color:var(--line)] bg-[rgba(32,27,24,0.96)] p-6 text-[var(--paper)]">
-                  <div className="flex items-center gap-3">
-                    <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/5 text-[var(--accent)]">
-                      <MonogramMark className="h-7 w-7" />
-                    </div>
-                    <div>
-                      <p className="font-display text-xl">VigIA Safety</p>
-                      <p className="text-sm text-[rgba(245,243,239,0.7)]">Controle operacional com leitura visual.</p>
-                    </div>
-                  </div>
+                <button type="submit" disabled={loginLoading} className="mt-2 h-12 w-full rounded-[10px] bg-[var(--accent)] text-[15px] font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60">
+                  {loginLoading ? 'Entrando…' : 'Entrar'}
+                </button>
 
-                  <div className="mt-6 space-y-3 text-sm leading-7 text-[rgba(245,243,239,0.82)]">
-                    <p>• acesso restrito para usuários autorizados;</p>
-                    <p>• leitura rápida para triagem de incidentes;</p>
-                    <p>• visual limpo, direto e responsivo.</p>
-                  </div>
+                {loginError ? <p className="rounded-[10px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-3.5 py-2.5 text-[13px] text-[#9e4120]">{loginError}</p> : null}
+              </form>
 
-                  <div className="mt-8 rounded-[24px] border border-white/10 bg-white/5 p-4">
-                    <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[rgba(245,243,239,0.66)]">Conexão</p>
-                    <p className="mt-2 font-display text-2xl text-[var(--paper)]">Pronto para entrada</p>
-                    <p className="mt-2 text-sm text-[rgba(245,243,239,0.72)]">A interface segue a mesma atmosfera do standalone: papel quente, contraste firme e acento terracota.</p>
-                  </div>
+              <p className="mt-7 text-center text-[13px] text-[var(--label)]">Acesso restrito a usuários autorizados.</p>
 
-                  <button type="button" onClick={goLanding} className="mt-6 inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-[var(--paper)] transition hover:bg-white/10 sm:hidden">
-                    Voltar à página inicial
-                  </button>
-                </div>
+              <div className="mt-4 flex items-center justify-center gap-3 text-[13px] text-[var(--muted)]">
+                <button type="button" onClick={() => void handleLogin({ email: 'admin@vigia.local', password: 'change-me-dev' })} className="transition hover:text-[var(--ink)]">
+                  Entrar com demo
+                </button>
+                <span className="text-[var(--label)]">·</span>
+                <button type="button" onClick={() => void handleLogin({ forceDemo: true })} className="transition hover:text-[var(--ink)]">
+                  Modo local
+                </button>
               </div>
             </div>
-          </section>
+          </div>
         </div>
       )}
 
