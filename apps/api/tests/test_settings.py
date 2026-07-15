@@ -57,6 +57,61 @@ class SettingsTest(unittest.TestCase):
         )
         self.assertEqual(settings.app_env, "production")
 
+    def test_staging_allows_internal_minio_endpoint_when_explicitly_enabled(self) -> None:
+        os.environ["APP_ENV"] = "staging"
+        settings = Settings(
+            jwt_secret="super-strong-jwt-secret-1234567890",
+            refresh_token_secret="super-strong-refresh-secret-1234567890",
+            database_url="postgresql+psycopg://vigia:strong@db:5432/vigia",
+            redis_url="redis://:strong@redis:6379/0",
+            repository_backend="postgres",
+            cookie_secure=True,
+            allowed_origins=["https://staging.vigia.local"],
+            minio_access_key="minio-access-key-strong-12345",
+            minio_secret_key="minio-secret-key-strong-12345",
+            smtp_host="smtp.prod.local",
+            smtp_user="smtp-user-strong-12345",
+            smtp_password="smtp-pass-strong-12345",
+            edge_worker_api_key="edge-api-key-strong-12345",
+            edge_worker_client_id="edge-client-id-strong-12345",
+            s3_endpoint_url="http://minio:9000",
+            allow_internal_s3_endpoint=True,
+            evidence_bucket_name="vigia-evidence-private",
+            metrics_token="metrics-token-strong-12345",
+        )
+        self.assertTrue(settings.allow_internal_s3_endpoint)
+
+    def test_staging_rejects_internal_minio_endpoint_without_flag(self) -> None:
+        os.environ["APP_ENV"] = "staging"
+        with self.assertRaises(ValueError):
+            Settings(
+                jwt_secret="super-strong-jwt-secret-1234567890",
+                refresh_token_secret="super-strong-refresh-secret-1234567890",
+                database_url="postgresql+psycopg://vigia:strong@db:5432/vigia",
+                redis_url="redis://:strong@redis:6379/0",
+                repository_backend="postgres",
+                cookie_secure=True,
+                allowed_origins=["https://staging.vigia.local"],
+                minio_access_key="minio-access-key-strong-12345",
+                minio_secret_key="minio-secret-key-strong-12345",
+                smtp_host="smtp.prod.local",
+                smtp_user="smtp-user-strong-12345",
+                smtp_password="smtp-pass-strong-12345",
+                edge_worker_api_key="edge-api-key-strong-12345",
+                edge_worker_client_id="edge-client-id-strong-12345",
+                s3_endpoint_url="http://minio:9000",
+                evidence_bucket_name="vigia-evidence-private",
+                metrics_token="metrics-token-strong-12345",
+            )
+
+    def test_s3_aliases_populate_minio_credentials(self) -> None:
+        os.environ["APP_ENV"] = "dev"
+        os.environ["S3_ACCESS_KEY_ID"] = "alias-access"
+        os.environ["S3_SECRET_ACCESS_KEY"] = "alias-secret"
+        settings = Settings()
+        self.assertEqual(settings.minio_access_key, "alias-access")
+        self.assertEqual(settings.minio_secret_key, "alias-secret")
+
     def test_staging_rejects_demo_credentials(self) -> None:
         os.environ["APP_ENV"] = "staging"
         with self.assertRaises(ValueError):

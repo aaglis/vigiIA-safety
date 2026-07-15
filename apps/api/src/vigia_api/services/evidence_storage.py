@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ..settings import settings
-
 try:  # pragma: no cover - optional runtime dependency
     import boto3
     from botocore.client import Config
@@ -42,12 +40,12 @@ class MockEvidenceStorage:
 
 
 class MinioEvidenceStorage:
-    def __init__(self, bucket_name: str | None = None, endpoint_url: str | None = None, access_key: str | None = None, secret_key: str | None = None, region_name: str | None = None) -> None:
-        self.bucket_name = bucket_name or settings.evidence_bucket_name
-        self.endpoint_url = endpoint_url or settings.s3_endpoint_url
-        self.access_key = access_key or settings.minio_access_key
-        self.secret_key = secret_key or settings.minio_secret_key
-        self.region_name = region_name or settings.s3_region
+    def __init__(self, bucket_name: str, endpoint_url: str | None = None, access_key: str | None = None, secret_key: str | None = None, region_name: str = "us-east-1") -> None:
+        self.bucket_name = bucket_name
+        self.endpoint_url = endpoint_url
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.region_name = region_name
         self._client = None
 
     @property
@@ -95,11 +93,17 @@ class MinioEvidenceStorage:
         self.client.delete_object(Bucket=self.bucket_name, Key=object_key)
 
 
-def default_evidence_storage() -> EvidenceStorage:
-    if settings.app_env.lower() in {"production", "staging"}:
-        if not settings.s3_endpoint_url:
+def default_evidence_storage(settings_obj: object) -> EvidenceStorage:
+    app_env = getattr(settings_obj, "app_env", "dev")
+    bucket_name = getattr(settings_obj, "evidence_bucket_name", "vigia-evidence-private")
+    endpoint_url = getattr(settings_obj, "s3_endpoint_url", None)
+    access_key = getattr(settings_obj, "minio_access_key", None) or getattr(settings_obj, "s3_access_key_id", None)
+    secret_key = getattr(settings_obj, "minio_secret_key", None) or getattr(settings_obj, "s3_secret_access_key", None)
+    region_name = getattr(settings_obj, "s3_region", "us-east-1")
+    if app_env.lower() in {"production", "staging"}:
+        if not endpoint_url:
             raise RuntimeError("s3_endpoint_url is required in staging/production")
         if boto3 is None:
             raise RuntimeError("real evidence storage required in staging/production but boto3 is unavailable")
-        return MinioEvidenceStorage()
-    return MockEvidenceStorage(bucket_name=settings.evidence_bucket_name)
+        return MinioEvidenceStorage(bucket_name=bucket_name, endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, region_name=region_name)
+    return MockEvidenceStorage(bucket_name=bucket_name)

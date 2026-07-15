@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import cast
 
 from ..domain.evidence import EvidenceAccessAuditLog, EvidenceKind, EvidencePurgeError, EvidenceRetentionPolicy, EvidenceSource, IncidentEvidence
-from ..settings import settings
+from ..settings import settings as global_settings
 from ..observability import log_event
 from .evidence_storage import EvidenceStorage, default_evidence_storage, MockEvidenceStorage
 from .security import generate_token
@@ -45,11 +45,12 @@ class InMemoryEvidenceMetadataRepository:
 
 
 class EvidenceService:
-    def __init__(self, storage: EvidenceStorage | None = None, metadata_repository: object | None = None) -> None:
+    def __init__(self, storage: EvidenceStorage | None = None, metadata_repository: object | None = None, settings_obj: object | None = None) -> None:
+        config = settings_obj or global_settings
         self.repository = InMemoryEvidenceRepository()
-        self.repository.bucket_name = settings.evidence_bucket_name
-        self.repository.default_ttl_seconds = settings.evidence_presigned_url_ttl_seconds
-        self.storage = storage or default_evidence_storage()
+        self.repository.bucket_name = getattr(config, "evidence_bucket_name", "vigia-evidence-private")
+        self.repository.default_ttl_seconds = getattr(config, "evidence_presigned_url_ttl_seconds", 300)
+        self.storage = storage or default_evidence_storage(config)
         self.metadata_repository = metadata_repository or InMemoryEvidenceMetadataRepository()
 
     def _save_metadata(self, evidence: IncidentEvidence) -> None:
@@ -188,7 +189,7 @@ class EvidenceService:
         logs = list(self.repository.audit_logs)
         list_all_audit_logs = getattr(self.metadata_repository, "list_audit_logs", None)
         if callable(list_all_audit_logs):
-            logs = list(list_all_audit_logs(organization_id))
+            logs = list(cast(list[EvidenceAccessAuditLog], list_all_audit_logs(organization_id)))
         if hasattr(self.metadata_repository, "audit_logs"):
             if incident_id is not None:
                 logs = list(getattr(self.metadata_repository, "audit_logs")(organization_id, incident_id))

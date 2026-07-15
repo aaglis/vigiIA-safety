@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
-from typing import cast
+from typing import Any, cast
 import os
 
 from vigia_api.domain.evidence import EvidenceKind, EvidencePurgeError, EvidenceSource
@@ -91,7 +91,7 @@ class EvidenceTest(unittest.TestCase):
             url = type("Url", (), {"path": "/api/v1/organizations/org-1/evidence/retention"})()
 
         payload = evidence_api.EvidenceRetentionIn(snapshot_days=5, actor_user_id="spoofed", reason="policy")
-        result = evidence_api.update_retention_policy("org-1", payload, request=Request(), current_user=CurrentUser())
+        result = evidence_api.update_retention_policy("org-1", payload, request=cast(Any, Request()), current_user=CurrentUser())
         self.assertEqual(result["snapshot_days"], 5)
         self.assertEqual(evidence_api.service.repository.audit_logs[-1].actor_user_id, "real-user")
 
@@ -135,7 +135,7 @@ class EvidenceTest(unittest.TestCase):
             settings_module.settings.app_env = "staging"
             settings_module.settings.s3_endpoint_url = None
             with self.assertRaises(RuntimeError):
-                default_evidence_storage()
+                default_evidence_storage(settings_module.settings)
         finally:
             os.environ.clear(); os.environ.update(prev)
 

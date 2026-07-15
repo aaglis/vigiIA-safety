@@ -1,0 +1,94 @@
+services:
+  api:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      REPOSITORY_BACKEND: postgres
+      RATE_LIMIT_BACKEND: redis
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://vigia:vigia@postgres:5432/vigia}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS as a JSON array, e.g. ["https://app.example.com"]}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?set REFRESH_TOKEN_SECRET in the environment}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN in the environment}
+      EDGE_WORKER_CLIENT_ID: ${EDGE_WORKER_CLIENT_ID:?set EDGE_WORKER_CLIENT_ID in the environment}
+      EDGE_WORKER_API_KEY: ${EDGE_WORKER_API_KEY:?set EDGE_WORKER_API_KEY in the environment}
+      INCIDENT_NOTIFICATION_ENABLED: ${INCIDENT_NOTIFICATION_ENABLED:-false}
+      INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      ALLOW_INTERNAL_S3_ENDPOINT: ${ALLOW_INTERNAL_S3_ENDPOINT:-true}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      EVIDENCE_BUCKET_NAME: ${EVIDENCE_BUCKET_NAME:-evidence-private}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY or S3_ACCESS_KEY_ID}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY or S3_SECRET_ACCESS_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vigia}
+      POSTGRES_USER: ${POSTGRES_USER:-vigia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vigia} -d $${POSTGRES_DB:-vigia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-07T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-${MINIO_ACCESS_KEY}}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-${MINIO_SECRET_KEY}}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-02-07T00-00-00Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >-
+      mc alias set pdc http://minio:9000 "$${MINIO_ROOT_USER:-$${MINIO_ACCESS_KEY:-$${S3_ACCESS_KEY_ID}}}" "$${MINIO_ROOT_PASSWORD:-$${MINIO_SECRET_KEY:-$${S3_SECRET_ACCESS_KEY}}}" &&
+      mc mb -p --ignore-existing pdc/$${EVIDENCE_BUCKET_NAME:-evidence-private} &&
+      mc anonymous set none pdc/$${EVIDENCE_BUCKET_NAME:-evidence-private}
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-${MINIO_ACCESS_KEY}}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-${MINIO_SECRET_KEY}}
+      EVIDENCE_BUCKET_NAME: ${EVIDENCE_BUCKET_NAME:-evidence-private}
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

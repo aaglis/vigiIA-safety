@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 from typing import Any, cast
 from pydantic_settings import BaseSettings
 
@@ -74,6 +75,7 @@ class Settings(BaseSettings):
     evidence_presigned_url_ttl_seconds: int = 300
     s3_region: str = "us-east-1"
     s3_endpoint_url: str | None = None
+    allow_internal_s3_endpoint: bool = False
     minio_access_key: str = "dev-only"
     minio_secret_key: str = "dev-only"
     smtp_host: str = "smtp.dev.local"
@@ -87,6 +89,23 @@ class Settings(BaseSettings):
     edge_worker_api_key: str = "dev-only"
     edge_worker_client_id: str = "dev-client-id"
     metrics_token: str = ""
+
+    def _apply_env_aliases(self, data: dict[str, Any]) -> dict[str, Any]:
+        if "minio_access_key" not in data:
+            alias = os.environ.get("S3_ACCESS_KEY_ID")
+            if alias:
+                data["minio_access_key"] = alias
+        if "minio_secret_key" not in data:
+            alias = os.environ.get("S3_SECRET_ACCESS_KEY")
+            if alias:
+                data["minio_secret_key"] = alias
+        return data
+
+    def _allows_internal_s3_endpoint(self) -> bool:
+        if not self.allow_internal_s3_endpoint or not self.s3_endpoint_url:
+            return False
+        parsed = urlparse(self.s3_endpoint_url)
+        return parsed.scheme == "http" and parsed.hostname == "minio"
 
     def validate_for_environment(self) -> None:
         environment = self.app_env.lower()
@@ -106,8 +125,6 @@ class Settings(BaseSettings):
                 "refresh_token_secret": self.refresh_token_secret,
                 "minio_access_key": self.minio_access_key,
                 "minio_secret_key": self.minio_secret_key,
-                "smtp_user": self.smtp_user,
-                "smtp_password": self.smtp_password,
                 "edge_worker_api_key": self.edge_worker_api_key,
                 "edge_worker_client_id": self.edge_worker_client_id,
                 "metrics_token": self.metrics_token,
@@ -115,11 +132,13 @@ class Settings(BaseSettings):
             config_fields = {
                 "database_url": self.database_url,
                 "redis_url": self.redis_url,
-                "smtp_host": self.smtp_host,
                 "incident_notification_recipients": ",".join(self.incident_notification_recipients),
                 "s3_endpoint_url": self.s3_endpoint_url or "",
                 "evidence_bucket_name": self.evidence_bucket_name,
             }
+            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "smtp":
+                secret_fields.update({"smtp_user": self.smtp_user, "smtp_password": self.smtp_password})
+                config_fields["smtp_host"] = self.smtp_host
             for field_name, value in secret_fields.items():
                 if _is_weak_secret(value):
                     raise ValueError(f"{field_name} must be configured with a strong non-default value in {environment}")
@@ -128,22 +147,24 @@ class Settings(BaseSettings):
                     raise ValueError(f"{field_name} must be configured for {environment}")
             if _uses_demo_credentials(self.database_url) or _uses_demo_credentials(self.redis_url):
                 raise ValueError(f"demo credentials are not allowed in {environment}")
-            if self.s3_endpoint_url is None or not self.s3_endpoint_url.startswith("https://"):
+            if self.s3_endpoint_url is None or not (self.s3_endpoint_url.startswith("https://") or self._allows_internal_s3_endpoint()):
                 raise ValueError(f"s3_endpoint_url must be a real https endpoint in {environment}")
             if _is_placeholder(self.evidence_bucket_name):
                 raise ValueError(f"evidence_bucket_name must be configured for {environment}")
-            demo_fields = {
-                "smtp_from": self.smtp_from,
-                "incident_notification_recipients": ",".join(self.incident_notification_recipients),
-            }
-            for field_name, value in demo_fields.items():
-                if _uses_demo_credentials(value):
-                    raise ValueError(f"{field_name} must not use demo credentials in {environment}")
+            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "smtp":
+                demo_fields = {
+                    "smtp_from": self.smtp_from,
+                    "incident_notification_recipients": ",".join(self.incident_notification_recipients),
+                }
+                for field_name, value in demo_fields.items():
+                    if _uses_demo_credentials(value):
+                        raise ValueError(f"{field_name} must not use demo credentials in {environment}")
 
     def __init__(self, **data: Any):  # type: ignore[override]
         env = os.environ.get("APP_ENV") or os.environ.get("VIGIA_ENV")
         if env and "app_env" not in data:
             data["app_env"] = env
+        data = self._apply_env_aliases(data)
         super().__init__(**cast(Any, data))
         self.validate_for_environment()
 

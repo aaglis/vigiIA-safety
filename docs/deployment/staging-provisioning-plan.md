@@ -55,6 +55,7 @@ Configurar no secret manager/painel, nunca em arquivo versionado:
 - `MINIO_ACCESS_KEY`
 - `MINIO_SECRET_KEY`
 - `S3_ENDPOINT_URL=https://...`
+- `ALLOW_INTERNAL_S3_ENDPOINT=true` only when the endpoint is internal `http://minio:9000` in a trusted compose/network
 - `S3_REGION`
 - `EVIDENCE_BUCKET_NAME`
 - `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` se notificações SMTP forem usadas
