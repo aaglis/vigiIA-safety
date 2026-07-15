@@ -50,10 +50,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "edge.heartbeat.write",
     },
     PlatformRole.PLATFORM_SUPPORT.value: {"incidents.read", "evidence.read", "audit.read"},
-    "org_owner": {"org.manage", "org.members.invite", "org.members.manage", "org.roles.manage", "org.security.manage", "sites.manage", "zones.manage", "cameras.manage", "rules.manage", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read", "audit.read"},
-    "org_admin": {"org.manage", "org.members.invite", "org.members.manage", "org.roles.manage", "org.security.manage", "sites.manage", "zones.manage", "cameras.manage", "rules.manage", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read", "audit.read"},
-    "manager": {"org.members.invite", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read"},
-    "auditor_viewer": {"incidents.read", "evidence.read", "audit.read"},
+    "org_owner": {"view_dashboard", "org.manage", "org.members.invite", "org.members.manage", "org.roles.manage", "org.security.manage", "sites.manage", "zones.manage", "cameras.manage", "rules.manage", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read", "audit.read"},
+    "org_admin": {"view_dashboard", "org.manage", "org.members.invite", "org.members.manage", "org.roles.manage", "org.security.manage", "sites.manage", "zones.manage", "cameras.manage", "rules.manage", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read", "audit.read"},
+    "manager": {"view_dashboard", "org.members.invite", "workers.manage", "workers.register", "incidents.read", "incidents.write", "incidents.acknowledge", "incidents.resolve", "incidents.dismiss", "evidence.read"},
+    "auditor_viewer": {"view_dashboard", "incidents.read", "evidence.read", "audit.read"},
 }
 
 ORG_ROLE_ALIASES = {"owner": "org_owner", "admin": "org_admin", "manager": "manager", "auditor": "auditor_viewer", "viewer": "auditor_viewer"}

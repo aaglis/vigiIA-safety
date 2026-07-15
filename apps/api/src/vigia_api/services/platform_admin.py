@@ -8,13 +8,12 @@ from ..domain.platform import Organization, OrganizationStatus, PlatformAuditLog
 from typing import Any
 
 from .auth import InMemoryAuthRepository
-from .security import generate_token
+from .security import generate_token, hash_password
 
 
 class PlatformAdminService:
     def __init__(self, auth_repository: Any | None = None) -> None:
         self.auth_repository = auth_repository or InMemoryAuthRepository()
-        self.auth_repository.seed_demo_user()
         self.organizations: dict[str, Organization] = {}
         self.audit_logs: list[PlatformAuditLog] = []
 
@@ -30,7 +29,7 @@ class PlatformAdminService:
             user = self.auth_repository.get_user_by_email(email)
             if user:
                 return user
-            user = User(id=generate_token(), email=email.lower(), full_name=email.split("@")[0].replace(".", " ").title(), password_hash=self.auth_repository.users[self.auth_repository.users_by_email["admin@vigia.local"]].password_hash)
+            user = User(id=generate_token(), email=email.lower(), full_name=email.split("@")[0].replace(".", " ").title(), password_hash=hash_password(generate_token(32)))
             self.auth_repository.add_user(user)
             return user
         return self.auth_repository.users[created_by_user_id]

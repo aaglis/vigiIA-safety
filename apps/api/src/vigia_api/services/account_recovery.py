@@ -21,7 +21,6 @@ class InMemoryAccountRecoveryRepository:
 class AccountRecoveryService:
     def __init__(self, auth_repository: Any | None = None) -> None:
         self.auth_repository = auth_repository or InMemoryAuthRepository()
-        self.auth_repository.seed_demo_user()
         self.repository = InMemoryAccountRecoveryRepository()
 
     def _audit(self, action: str, user_id: str | None, email: str | None, **metadata: str) -> None:

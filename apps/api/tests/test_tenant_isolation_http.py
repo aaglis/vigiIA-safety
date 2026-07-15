@@ -39,8 +39,8 @@ class TenantIsolationHttpTest(unittest.TestCase):
         self.container.edge_worker_service.repository.save(self.worker)
         self.container.edge_worker_service.camera_catalog[("org-demo", "site-demo")] = {"camera-demo-01"}
         ops = self.container.operations_repository
-        site = ops.create_site("org-demo", "HQ", "Main street")
-        camera = ops.create_camera("org-demo", site.id, "Gate", "stream-1")
+        site = ops.create_site("org-demo", "HQ", "Main street", site_id="site-demo")
+        camera = ops.create_camera("org-demo", site.id, "Gate", "stream-1", camera_id="camera-demo-01")
         zone = ops.create_zone("org-demo", site.id, camera.id, ZoneType.ACCESS, {"points": [[0, 0], [1, 1]]}, zone_id="zone-demo-01")
         rule = ops.create_safety_rule("org-demo", "Helmet required", site_id=site.id, zone_id=zone.id)
         ops.create_required_ppe("org-demo", rule.id, "helmet", site_id=site.id, zone_id=zone.id)

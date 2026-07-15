@@ -2,7 +2,7 @@ import unittest
 
 from vigia_api.domain.auth import AuthenticatedUser, MembershipSummary, OrganizationSummary, Permission, PlatformRole, User
 from vigia_api.api.v1 import evidence as evidence_api
-from vigia_api.security.dependencies import auth_service, get_current_organization_membership
+from vigia_api.security.dependencies import get_current_organization_membership
 
 try:
     from fastapi.testclient import TestClient  # type: ignore[import-not-found]
@@ -52,9 +52,9 @@ class RbacDependenciesTest(unittest.TestCase):
 
     @unittest.skipIf(TestClient is None, "fastapi test client unavailable")
     def test_http_protected_route_accepts_organization_id_path_param(self) -> None:
-        tokens, _, _ = auth_service.login("admin@vigia.local", "change-me-dev")
         client = TestClient(app)  # type: ignore[arg-type,operator]
-        client.cookies.set("access_token", tokens.access_token)
+        login = client.post("/api/v1/auth/login", json={"email": "admin@vigia.local", "password": "change-me-dev"}, headers={"Origin": "http://localhost:3000", "Referer": "http://localhost:3000/"})
+        self.assertEqual(login.status_code, 200)
 
         response = client.get("/api/v1/organizations/org-dev/incidents")
 
@@ -63,9 +63,9 @@ class RbacDependenciesTest(unittest.TestCase):
 
     @unittest.skipIf(TestClient is None, "fastapi test client unavailable")
     def test_http_protected_route_denies_unknown_organization(self) -> None:
-        tokens, _, _ = auth_service.login("admin@vigia.local", "change-me-dev")
         client = TestClient(app)  # type: ignore[arg-type,operator]
-        client.cookies.set("access_token", tokens.access_token)
+        login = client.post("/api/v1/auth/login", json={"email": "admin@vigia.local", "password": "change-me-dev"}, headers={"Origin": "http://localhost:3000", "Referer": "http://localhost:3000/"})
+        self.assertEqual(login.status_code, 200)
 
         response = client.get("/api/v1/organizations/org-missing/incidents")
 

@@ -28,7 +28,6 @@ class InMemoryInviteRepository:
 class InviteService:
     def __init__(self, auth_repository: Any | None = None) -> None:
         self.auth_repository = auth_repository or InMemoryAuthRepository()
-        self.auth_repository.seed_demo_user()
         self.repository = InMemoryInviteRepository()
 
     def _allowed_roles_for(self, inviter_role: str) -> set[str]:
