@@ -17,6 +17,7 @@ required_files=(
   "apps/web/src/App.tsx"
   "apps/web/src/index.css"
   "apps/web/Dockerfile"
+  "apps/web/nginx.conf"
   "apps/api/README.md"
   "apps/api/pyproject.toml"
   "apps/api/src/vigia_api/__init__.py"
