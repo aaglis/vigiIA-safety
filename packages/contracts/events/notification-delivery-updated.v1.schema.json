@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vigia-safety.local/contracts/events/notification-delivery-updated.v1.schema.json",
+  "title": "notification-delivery-updated.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["delivery_id", "notification_id", "incident_id", "organization_id", "channel", "status", "updated_at"],
+  "properties": {
+    "delivery_id": { "type": "string", "minLength": 1 },
+    "notification_id": { "type": "string", "minLength": 1 },
+    "incident_id": { "type": "string", "minLength": 1 },
+    "organization_id": { "type": "string", "minLength": 1 },
+    "channel": { "type": "string", "enum": ["dashboard", "email", "whatsapp"] },
+    "status": { "type": "string", "enum": ["pending", "sent", "delivered", "seen", "acknowledged", "failed", "suppressed"] },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "recipient_id": { "type": "string" },
+    "actor_id": { "type": "string" },
+    "actor_role": { "type": "string", "enum": ["supervisor", "worker_external", "system", "platform_admin"] },
+    "reason": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

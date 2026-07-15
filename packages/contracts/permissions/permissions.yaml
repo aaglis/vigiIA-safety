@@ -1,0 +1,63 @@
+version: 1
+roles:
+  platform_owner:
+    description: Controle total da plataforma, com auditoria completa.
+  platform_admin:
+    description: Administra a operação da plataforma com acesso restrito e auditado.
+  platform_support:
+    description: Suporte operacional com acesso restrito e auditado.
+  org_owner:
+    description: Dono da organização com controle máximo do tenant.
+  org_admin:
+    description: Administra membros e ativos operacionais da organização.
+  manager:
+    description: Supervisiona operações e gerencia incidentes e workers.
+  auditor_viewer:
+    description: Consulta dados, evidências permitidas e trilhas de auditoria.
+permissions:
+  - key: org.create
+    roles: [platform_owner, platform_admin]
+  - key: org.suspend
+    roles: [platform_owner, platform_admin]
+  - key: org.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: org.members.invite
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: org.members.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: org.roles.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: org.security.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: sites.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: zones.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: cameras.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: rules.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: workers.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: workers.register
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: rules.manage
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: incidents.read
+    roles: [platform_owner, platform_admin, platform_support, org_owner, org_admin, manager, auditor_viewer]
+  - key: incidents.write
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: incidents.acknowledge
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: incidents.resolve
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: incidents.dismiss
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
+  - key: evidence.read
+    roles: [platform_owner, platform_admin, platform_support, org_owner, org_admin, manager, auditor_viewer]
+  - key: audit.read
+    roles: [platform_owner, platform_admin, platform_support, org_owner, org_admin, auditor_viewer]
+  - key: edge.heartbeat.write
+    roles: [platform_owner, platform_admin, org_owner, org_admin]
+  - key: edge.config.read
+    roles: [platform_owner, platform_admin, org_owner, org_admin, manager]

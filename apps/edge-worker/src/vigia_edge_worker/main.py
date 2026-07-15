@@ -1,0 +1,245 @@
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from uuid import uuid4
+
+from .config import default_config
+from .client import EdgeApiClient
+from .buffer import DetectionBuffer
+from .detector_factory import DetectorSelection, build_detector
+from .evidence import build_snapshot
+from .events import validate_detection_event, validate_heartbeat_event
+from .heartbeat import build_heartbeat
+from .mock_detector import detect_once
+from .rules import RuleEngine
+from .source import FrameSourceError, build_frame_source
+from .telemetry import TelemetryState, sanitize_error, structured_log
+
+
+def _build_detection(config, selection, frame, result):
+    return {
+        "event_id": uuid4().hex,
+        "camera_id": frame.camera_id,
+        "site_id": frame.site_id,
+        "organization_id": frame.organization_id,
+        "timestamp": frame.timestamp,
+        "event_type": result.event_type,
+        "zone_id": result.zone_id,
+        "confidence": result.confidence,
+        "model_version": result.model_version,
+        "severity": "medium",
+        "summary": f"Detection in zone {result.zone_id}",
+        "worker_id": frame.worker_id,
+        "evidence": result.evidence,
+        "metadata": {"cv_mode": selection.cv_mode, "source_type": frame.metadata.get("source_type", config.edge_source_type), **result.metadata},
+    }
+
+
+def _evidence_payload(config, frame, upload_path=None, file_id=None):
+    fid = file_id or uuid4().hex
+    snapshot = build_snapshot(fid, frame, upload_path=upload_path)
+    return snapshot.to_dict()
+
+
+def _upload_frame_bytes(client, upload_ref: dict | None, frame, telemetry: TelemetryState | None = None) -> dict[str, object]:
+    if not upload_ref:
+        return {"upload_status": "skipped", "reason": "no_upload_ref"}
+    if not frame.image_bytes:
+        return {"upload_status": "skipped", "reason": "no_frame_bytes"}
+    try:
+        started = time.perf_counter()
+        result = client.upload_evidence_bytes(upload_ref, frame.image_bytes)
+        if telemetry is not None:
+            telemetry.record_send_latency((time.perf_counter() - started) * 1000)
+        structured_log("edge_worker.evidence_upload_ok", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="ok")
+        return {"upload_status": result.get("status", "uploaded")}
+    except Exception as exc:
+        if telemetry is not None:
+            telemetry.record_error(exc, kind="api")
+        structured_log("edge_worker.evidence_upload_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="failed", upload_error=sanitize_error(exc))
+        return {"upload_status": "failed", "upload_error": sanitize_error(exc)}
+
+
+def _safe_request_evidence_upload(client, file_id: str, buffer: DetectionBuffer | None = None):
+    try:
+        return client.request_evidence_upload(file_id=file_id)
+    except Exception:
+        if buffer is None:
+            raise
+        return None
+
+
+def _send_detection(client, detection: dict, buffer: DetectionBuffer | None = None, telemetry: TelemetryState | None = None) -> None:
+    if buffer is None:
+        client.send_detection(detection)
+        return
+    event_id = str(detection["event_id"])
+    buffer.enqueue(detection)
+    try:
+        client.send_detection_with_retry(detection, attempts=1)
+        buffer.mark_sent(event_id)
+    except Exception as exc:
+        if telemetry is not None:
+            telemetry.record_error(exc, kind="buffer")
+        structured_log("edge_worker.detection_send_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=detection.get("camera_id"), site_id=detection.get("site_id"), organization_id=detection.get("organization_id"), latency_ms=None, result="failed", error=exc)
+        buffer.mark_failed(event_id, detection, str(exc), attempts=1)
+
+
+def _drain_buffer(client, buffer: DetectionBuffer, telemetry: TelemetryState | None = None) -> None:
+    for buffered in buffer.due():
+        try:
+            client.send_detection_with_retry(buffered.payload, attempts=1)
+            buffer.mark_sent(buffered.event_id)
+        except Exception as exc:
+            if telemetry is not None:
+                telemetry.record_error(exc, kind="buffer")
+            buffer.mark_failed(buffered.event_id, buffered.payload, str(exc), attempts=buffered.attempts + 1)
+
+
+def _run_pipeline(config, selection, detector, source, rules=None, client=None, api_mode: bool = False, buffer: DetectionBuffer | None = None):
+    processed_frames = 0
+    emitted_events = 0
+    detections = []
+    frames = []
+    detector_results = []
+    telemetry = TelemetryState(cv_mode=selection.cv_mode, source_type=config.edge_source_type, worker_version=config.worker_version)
+    for frame in source.frames():
+        infer_started = time.perf_counter()
+        results = detector.detect(frame)
+        telemetry.record_inference_latency((time.perf_counter() - infer_started) * 1000)
+        frames.append(frame)
+        detector_results.append(results[0] if results else None)
+        processed_frames += 1
+        if not results:
+            if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
+                break
+            continue
+        file_id = uuid4().hex
+        upload_ref = None
+        if api_mode and client is not None:
+            upload_ref = _safe_request_evidence_upload(client, file_id, buffer=buffer)
+        upload_result = _upload_frame_bytes(client, upload_ref, frame, telemetry=telemetry) if api_mode and client is not None else {"upload_status": "skipped", "reason": "api_disabled"}
+        evidence_payload = _evidence_payload(config, frame, upload_path=upload_ref.get("upload_path") if upload_ref else None, file_id=file_id)
+        evidence_payload.update(upload_result)
+        applied = rules.apply(frame, results[0]) if rules is not None else None
+        if rules is not None and applied is None:
+            if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
+                break
+            continue
+        result = results[0]
+        detection = _build_detection(config, selection, frame, result)
+        if applied is not None:
+            detection["event_type"] = applied.event_type
+            detection["severity"] = applied.severity
+            detection["summary"] = applied.summary
+            detection["zone_id"] = applied.zone_id
+            detection["metadata"] = {**detection["metadata"], **applied.metadata}
+        detection["evidence"] = evidence_payload
+        validate_detection_event(detection)
+        detections.append(detection)
+        emitted_events += 1
+        if api_mode and client is not None:
+            send_started = time.perf_counter()
+            _send_detection(client, detection, buffer=buffer, telemetry=telemetry)
+            telemetry.record_send_latency((time.perf_counter() - send_started) * 1000)
+        if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
+            break
+        if config.edge_frame_interval_seconds > 0:
+            time.sleep(config.edge_frame_interval_seconds)
+    telemetry.processed_frames = processed_frames
+    telemetry.emitted_events = emitted_events
+    telemetry.pending_queue = buffer.pending_count() if buffer is not None else 0
+    heartbeat = build_heartbeat(config, processed_frames=processed_frames, emitted_events=emitted_events, telemetry=telemetry, pending_queue=telemetry.pending_queue, last_error=telemetry.last_error).to_dict()
+    validate_heartbeat_event(heartbeat)
+    if api_mode and client is not None:
+        try:
+            client.send_heartbeat(heartbeat)
+            structured_log("edge_worker.heartbeat_sent", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=telemetry.send_latencies_ms[-1] if telemetry.send_latencies_ms else None, result="ok", pending_queue=telemetry.pending_queue)
+        except Exception as exc:
+            telemetry.record_error(exc, kind="api")
+            structured_log("edge_worker.heartbeat_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=None, result="failed", error=exc)
+            if buffer is None:
+                raise
+    return {"detections": detections, "heartbeat": heartbeat, "processed_frames": processed_frames, "emitted_events": emitted_events, "frames": frames, "detector_results": detector_results, "telemetry": telemetry}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--send-api", action="store_true")
+    parser.add_argument("--diagnose", action="store_true")
+    args = parser.parse_args()
+
+    config = default_config()
+    selection = DetectorSelection(cv_mode=config.cv_mode, cv_real_enabled=config.cv_real_enabled, cv_real_marker=config.cv_real_marker, cv_real_model_version=config.cv_real_model_version)
+    detector = build_detector(config, selection)
+    source = build_frame_source(config)
+    rules = RuleEngine(cooldown_seconds=config.edge_detection_cooldown_seconds)
+    buffer = DetectionBuffer(config.edge_buffer_path, max_attempts=config.edge_buffer_max_attempts, backoff_seconds=config.edge_buffer_backoff_seconds) if config.edge_buffer_path else None
+
+    if args.mock and args.once:
+        detection = detect_once(config).to_dict()
+        heartbeat = build_heartbeat(config, processed_frames=1, emitted_events=1).to_dict()
+        validate_detection_event(detection)
+        validate_heartbeat_event(heartbeat)
+        print(json.dumps(detection, ensure_ascii=False))
+        print(json.dumps(heartbeat, ensure_ascii=False))
+        return 0
+
+    if args.diagnose:
+        diag = {"worker_id": config.edge_worker_id, "cv_mode": config.cv_mode, "source_type": config.edge_source_type, "buffer_path": config.edge_buffer_path, "pending_queue": buffer.pending_count() if buffer is not None else 0, "buffer_enabled": buffer is not None}
+        print(json.dumps(diag, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    api_mode = bool(args.send_api or (config.edge_api_base_url and config.edge_api_key))
+    if api_mode and (not config.edge_api_base_url or not config.edge_api_key):
+        parser.error("EDGE_API_BASE_URL and EDGE_API_KEY are required for API mode")
+
+    client_id = config.edge_client_id or config.edge_worker_id
+    correlation_id = uuid4().hex
+    client = None
+    if api_mode:
+        assert config.edge_api_base_url is not None and config.edge_api_key is not None
+        client = EdgeApiClient(config.edge_api_base_url, client_id, config.edge_api_key, request_id=correlation_id)
+        print(json.dumps({"mode": "api", "target": client.describe()}, ensure_ascii=False))
+    else:
+        print(json.dumps({"mode": "local", "source_type": config.edge_source_type, "cv_mode": config.cv_mode}, ensure_ascii=False))
+
+    def run_once() -> None:
+        if api_mode and client is not None:
+            try:
+                config_payload = client.get_config()
+                rules.load_context(config_payload)
+            except Exception:
+                if buffer is None:
+                    raise
+        if api_mode and client is not None and buffer is not None:
+            _drain_buffer(client, buffer, telemetry=TelemetryState(cv_mode=config.cv_mode, source_type=config.edge_source_type, worker_version=config.worker_version))
+        result = _run_pipeline(config, selection, detector, source, rules=rules, client=client, api_mode=api_mode, buffer=buffer)
+        for detection in result["detections"]:
+            structured_log("edge_worker.detection_emitted", request_id=correlation_id, correlation_id=correlation_id, camera_id=detection["camera_id"], site_id=detection["site_id"], organization_id=detection["organization_id"], latency_ms=None, result="ok")
+            print(json.dumps(detection, ensure_ascii=False))
+        print(json.dumps(result["heartbeat"], ensure_ascii=False))
+        sent = ["heartbeat"] + (["detection"] if result["emitted_events"] else [])
+        print(json.dumps({"sent": sent, "client_id": client_id, "request_id": correlation_id, "processed_frames": result["processed_frames"], "emitted_events": result["emitted_events"]}, ensure_ascii=False))
+
+    if config.run_once or args.once:
+        try:
+            run_once()
+        except FrameSourceError as exc:
+            raise SystemExit(str(exc)) from exc
+        return 0
+
+    while True:
+        try:
+            run_once()
+        except FrameSourceError as exc:
+            raise SystemExit(str(exc)) from exc
+        time.sleep(max(1, config.poll_interval_seconds))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

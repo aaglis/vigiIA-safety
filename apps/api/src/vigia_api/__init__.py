@@ -1,0 +1,1 @@
+"""VigIA API package."""

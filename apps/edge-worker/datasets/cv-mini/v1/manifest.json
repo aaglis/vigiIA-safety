@@ -1,0 +1,50 @@
+{
+  "dataset": "cv-mini",
+  "version": "v1",
+  "description": "Minimal synthetic CV validation set for helmets, vests, and restricted zones.",
+  "samples": [
+    {
+      "id": "helmet-restricted-positive",
+      "file": "frames/helmet_restricted.txt",
+      "class": "positive",
+      "expected_detection": true,
+      "expected_event_type": "real_detection",
+      "expected_zone_id": "zone-critical",
+      "marker": "helmet",
+      "notes": "Synthetic positive sample for restricted zone with helmet marker."
+    },
+    {
+      "id": "vest-info-positive",
+      "file": "frames/vest_info.txt",
+      "class": "positive",
+      "expected_detection": true,
+      "expected_event_type": "real_detection",
+      "expected_zone_id": "zone-info",
+      "marker": "vest",
+      "notes": "Synthetic positive sample for informational zone with vest marker."
+    },
+    {
+      "id": "empty-negative",
+      "file": "frames/empty_floor.txt",
+      "class": "negative",
+      "expected_detection": false,
+      "marker": "helmet",
+      "notes": "No marker present, should not trigger detection."
+    },
+    {
+      "id": "no-marker-negative",
+      "file": "frames/no_marker_person.txt",
+      "class": "negative",
+      "expected_detection": false,
+      "marker": "helmet",
+      "notes": "Person-like text without configured marker."
+    }
+  ],
+  "criteria": {
+    "demo_precision_min": 1.0,
+    "demo_recall_min": 1.0,
+    "beta_precision_min": 0.95,
+    "beta_recall_min": 0.95,
+    "max_average_latency_ms": 5.0
+  }
+}

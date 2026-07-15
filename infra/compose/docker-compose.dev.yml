@@ -1,0 +1,145 @@
+# Development compose skeleton for VigIA Safety.
+# Apps remain independently buildable/deployable; this file only wires local dependencies.
+# All credentials below are dev-only placeholders.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: vigia
+      POSTGRES_USER: vigia
+      POSTGRES_PASSWORD: vigia # dev-only
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${REDIS_HOST_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vigia # dev-only
+      MINIO_ROOT_PASSWORD: vigia12345 # dev-only
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${MINIO_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+
+  api:
+    image: vigia-api:dev
+    build:
+      context: ../../apps/api
+    env_file:
+      - ../../.env.example
+    environment:
+      APP_ENV: dev
+      REPOSITORY_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg://vigia:vigia@postgres:5432/vigia
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_BACKEND: redis
+      MINIO_ENDPOINT: http://minio:9000
+      JWT_SECRET: dev-only-jwt-secret-change-me
+      REFRESH_TOKEN_SECRET: dev-only-refresh-secret-change-me
+      SMTP_HOST: smtp.dev.local
+      SMTP_PORT: 1025
+      EDGE_WORKER_CLIENT_ID: dev-client-id
+      EDGE_WORKER_API_KEY: dev-api-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "${API_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport json, urllib.request, sys\ntry:\n    data = urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5).read().decode()\n    obj = json.loads(data)\n    sys.exit(0 if obj.get('status') in ('ok', 'degraded') else 1)\nexcept Exception:\n    sys.exit(1)\nPY"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  migrate:
+    image: vigia-api:dev
+    build:
+      context: ../../apps/api
+    env_file:
+      - ../../.env.example
+    environment:
+      APP_ENV: dev
+      REPOSITORY_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg://vigia:vigia@postgres:5432/vigia
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
+  seed:
+    image: vigia-api:dev
+    build:
+      context: ../../apps/api
+    env_file:
+      - ../../.env.example
+    environment:
+      APP_ENV: dev
+      REPOSITORY_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg://vigia:vigia@postgres:5432/vigia
+      EDGE_WORKER_CLIENT_ID: dev-client-id
+      EDGE_WORKER_API_KEY: dev-api-key
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "-m", "vigia_api.scripts.seed_demo"]
+
+  web:
+    image: vigia-web:dev
+    build:
+      context: ../../apps/web
+    env_file:
+      - ../../.env.example
+    environment:
+      APP_ENV: dev
+      WEB_API_BASE_URL: http://localhost:8000/api/v1
+    ports:
+      - "${WEB_HOST_PORT:-5173}:5173"
+
+  edge-worker:
+    image: vigia-edge-worker:dev
+    build:
+      context: ../../apps/edge-worker
+    environment:
+      APP_ENV: dev
+      EDGE_API_BASE_URL: http://api:8000/api/v1
+      EDGE_CLIENT_ID: dev-client-id # dev-only
+      EDGE_API_KEY: dev-api-key # dev-only
+      EDGE_RUN_ONCE: "true"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

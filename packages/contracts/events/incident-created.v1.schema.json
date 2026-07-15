@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vigia-safety.local/contracts/events/incident-created.v1.schema.json",
+  "title": "incident-created.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["incident_id", "organization_id", "created_at", "severity", "summary"],
+  "properties": {
+    "incident_id": { "type": "string", "minLength": 1 },
+    "organization_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "source_event_id": { "type": "string" }
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "validate": "bash scripts/validate.sh"
+}
