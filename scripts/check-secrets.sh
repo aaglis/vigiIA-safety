@@ -63,7 +63,15 @@ def is_excluded(path: Path) -> bool:
     return any(part in EXCLUDED_DIRS for part in path.parts)
 
 
+EMPTY_STRING_LITERAL = re.compile(r"""^\s*(''|"")""")
+
+
 def is_placeholder(value: str) -> bool:
+    # String vazia literal (api_key: '') é o oposto de um segredo — normalmente é o código
+    # que LIMPA a chave. O regex de valor captura o resto da linha (`'' })`), então o
+    # teste de "vazio" abaixo não bastaria.
+    if EMPTY_STRING_LITERAL.match(value):
+        return True
     normalized = value.strip().strip('"\'').lower()
     if not normalized or normalized in {'true', 'false', 'none', 'null'}:
         return True
