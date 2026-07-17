@@ -26,6 +26,9 @@ class WorkerConfig:
     edge_reconnect_backoff_seconds: float = 2.0
     edge_reconnect_max_backoff_seconds: float = 30.0
     edge_frame_interval_seconds: float = 0.0
+    # Câmera 24/7 nunca sai do laço de frames: sem heartbeat periódico o worker aparece
+    # offline enquanto trabalha. 60s casa com o threshold de 300s do job de offline.
+    edge_heartbeat_interval_seconds: float = 60.0
     edge_max_frames: int | None = None
     edge_detection_cooldown_seconds: int = 0
     edge_buffer_path: str | None = None
@@ -57,6 +60,7 @@ def default_config() -> WorkerConfig:
         edge_reconnect_backoff_seconds=float(os.environ.get("EDGE_RECONNECT_BACKOFF_SECONDS", "2")),
         edge_reconnect_max_backoff_seconds=float(os.environ.get("EDGE_RECONNECT_MAX_BACKOFF_SECONDS", "30")),
         edge_frame_interval_seconds=float(os.environ.get("EDGE_FRAME_INTERVAL_SECONDS", "0")),
+        edge_heartbeat_interval_seconds=float(os.environ.get("EDGE_HEARTBEAT_INTERVAL_SECONDS", "60")),
         edge_max_frames=int(os.environ["EDGE_MAX_FRAMES"]) if os.environ.get("EDGE_MAX_FRAMES") else None,
         edge_detection_cooldown_seconds=int(os.environ.get("EDGE_DETECTION_COOLDOWN_SECONDS", "0")),
         edge_buffer_path=os.environ.get("EDGE_BUFFER_PATH"),

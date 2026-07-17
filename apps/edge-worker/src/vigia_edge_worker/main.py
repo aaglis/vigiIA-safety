@@ -54,6 +54,39 @@ def _publish_frame_analysis(client, detector, frame) -> None:
         structured_log("edge_worker.frame_analysis_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="failed", error=sanitize_error(exc))
 
 
+def _refresh_inactive_rules(detector, telemetry) -> None:
+    """As classes do modelo só existem depois do primeiro `detect()` (carga lazy), então
+    isto é avaliado a cada heartbeat — não uma vez antes do laço, quando o detector ainda
+    não sabe o que consegue ver."""
+    aviso = "ppe_violation:modelo-sem-classe-de-capacete"
+    cego = bool(getattr(detector, "_uses_yolo", lambda: False)()) and not getattr(detector, "can_see_helmet", True)
+    if cego and aviso not in telemetry.inactive_rules:
+        telemetry.inactive_rules.append(aviso)
+    if not cego and aviso in telemetry.inactive_rules:
+        telemetry.inactive_rules.remove(aviso)
+
+
+def _send_heartbeat(config, client, telemetry, processed_frames: int, emitted_events: int, buffer, api_mode: bool, detector=None) -> dict:
+    """Monta e envia o heartbeat. Devolve o payload (os testes usam o do fim do ciclo)."""
+    if detector is not None:
+        _refresh_inactive_rules(detector, telemetry)
+    telemetry.processed_frames = processed_frames
+    telemetry.emitted_events = emitted_events
+    telemetry.pending_queue = buffer.pending_count() if buffer is not None else 0
+    heartbeat = build_heartbeat(config, processed_frames=processed_frames, emitted_events=emitted_events, telemetry=telemetry, pending_queue=telemetry.pending_queue, last_error=telemetry.last_error).to_dict()
+    validate_heartbeat_event(heartbeat)
+    if api_mode and client is not None:
+        try:
+            client.send_heartbeat(heartbeat)
+            structured_log("edge_worker.heartbeat_sent", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=telemetry.send_latencies_ms[-1] if telemetry.send_latencies_ms else None, result="ok", pending_queue=telemetry.pending_queue)
+        except Exception as exc:
+            telemetry.record_error(exc, kind="api")
+            structured_log("edge_worker.heartbeat_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=None, result="failed", error=exc)
+            if buffer is None:
+                raise
+    return heartbeat
+
+
 def _build_detection(config, selection, frame, result):
     return {
         "event_id": uuid4().hex,
@@ -148,11 +181,14 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
     frames = deque(maxlen=history)
     detector_results = deque(maxlen=history)
     telemetry = TelemetryState(cv_mode=selection.cv_mode, source_type=getattr(source, "source_type", config.edge_source_type), worker_version=config.worker_version)
-    # O modelo carregado pode não ter como avaliar EPI. Isso precisa ficar visível: sem
-    # o aviso, "zero incidentes de EPI" parece conformidade quando é cegueira.
-    if getattr(detector, "_uses_yolo", lambda: False)() and not getattr(detector, "can_see_helmet", True):
-        telemetry.inactive_rules.append("ppe_violation:modelo-sem-classe-de-capacete")
+    # Câmera ao vivo = laço infinito: o heartbeat do fim do ciclo NUNCA seria enviado e o
+    # worker apareceria offline enquanto trabalha (o job `run_offline_workers` usa
+    # last_heartbeat_at). Por isso vai também de tempos em tempos, aqui dentro.
+    ultimo_heartbeat = time.monotonic()
     for frame in source.frames():
+        if api_mode and (time.monotonic() - ultimo_heartbeat) >= config.edge_heartbeat_interval_seconds:
+            _send_heartbeat(config, client, telemetry, processed_frames, emitted_events, buffer, api_mode, detector)
+            ultimo_heartbeat = time.monotonic()
         infer_started = time.perf_counter()
         results = detector.detect(frame)
         telemetry.record_inference_latency((time.perf_counter() - infer_started) * 1000)
@@ -198,20 +234,7 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
             break
         if config.edge_frame_interval_seconds > 0:
             time.sleep(config.edge_frame_interval_seconds)
-    telemetry.processed_frames = processed_frames
-    telemetry.emitted_events = emitted_events
-    telemetry.pending_queue = buffer.pending_count() if buffer is not None else 0
-    heartbeat = build_heartbeat(config, processed_frames=processed_frames, emitted_events=emitted_events, telemetry=telemetry, pending_queue=telemetry.pending_queue, last_error=telemetry.last_error).to_dict()
-    validate_heartbeat_event(heartbeat)
-    if api_mode and client is not None:
-        try:
-            client.send_heartbeat(heartbeat)
-            structured_log("edge_worker.heartbeat_sent", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=telemetry.send_latencies_ms[-1] if telemetry.send_latencies_ms else None, result="ok", pending_queue=telemetry.pending_queue)
-        except Exception as exc:
-            telemetry.record_error(exc, kind="api")
-            structured_log("edge_worker.heartbeat_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=None, result="failed", error=exc)
-            if buffer is None:
-                raise
+    heartbeat = _send_heartbeat(config, client, telemetry, processed_frames, emitted_events, buffer, api_mode, detector)
     return {"detections": list(detections), "heartbeat": heartbeat, "processed_frames": processed_frames, "emitted_events": emitted_events, "frames": list(frames), "detector_results": list(detector_results), "telemetry": telemetry}
 
 

@@ -178,9 +178,10 @@ services:
       EDGE_API_KEY: dev-api-key # dev-only
       CV_MODE: real
       CV_REAL_ENABLED: "1"
-      # yolov8n (COCO) já detecta 'person' p/ intrusão; troque por um modelo de EPI
-      # (com classe helmet/head) montado em /models para validar capacete.
-      CV_MODEL_PATH: ${CV_MODEL_PATH:-yolov8n.pt}
+      # Modelo multi-classe (Person + Hardhat + NO-Hardhat): cobre intrusão E capacete na
+      # mesma inferência. Com um modelo sem classe de capacete (ex.: yolov8n/COCO), a regra
+      # de EPI fica INATIVA de propósito — ver `inactive_rules` no heartbeat.
+      CV_MODEL_PATH: ${CV_MODEL_PATH:-/models/ppe-multiclass.pt}
       CV_CONFIDENCE_THRESHOLD: ${CV_CONFIDENCE_THRESHOLD:-0.4}
       EDGE_VIDEO_FRAME_STRIDE: ${EDGE_VIDEO_FRAME_STRIDE:-15}
       # false = fica vivo como câmera 24/7 (default: é o que a produção faz e o que o
