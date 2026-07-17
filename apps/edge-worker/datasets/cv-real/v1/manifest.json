@@ -1,0 +1,37 @@
+{
+  "version": "cv-real/v1",
+  "fonte": "apps/edge-worker/assets/sample-ppe.mp4 (fábrica têxtil, câmera alta entre prateleiras)",
+  "como_foi_anotado": "Inspeção visual frame a frame por humano. Ground truth em nível de FRAME (não bbox): é a decisão que o produto toma — 'há alguém sem capacete neste quadro?'. mAP de bbox mediria o modelo; isto mede o sistema.",
+  "limitacoes_conhecidas": [
+    "Amostra MÍNIMA (3 frames) — serve para exercitar a medição e pegar regressão grosseira, NÃO para publicar taxa de acerto.",
+    "Uma única câmera, um único cenário (têxtil, luz artificial, câmera alta). Não cobre obra, pátio, contraluz, noite.",
+    "Pessoas ao fundo são pequenas e borradas; a trabalhadora em primeiro plano tem os pés cortados pelo quadro.",
+    "Nenhuma pessoa COM capacete no material — não mede o falso positivo de 'acusar quem está de capacete'."
+  ],
+  "samples": [
+    {
+      "id": "f01",
+      "file": "frames/f01.jpg",
+      "pessoas_esperadas": 2,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "Trabalhadora em primeiro plano à esquerda, sem capacete, pés fora do quadro. Uma pessoa ao fundo, na porta, pequena e borrada."
+    },
+    {
+      "id": "f05",
+      "file": "frames/f05.jpg",
+      "pessoas_esperadas": 2,
+      "pessoas_sem_capacete": 2,
+      "ha_violacao_epi": true,
+      "notas": "Trabalhadora em primeiro plano + homem de azul caminhando ao fundo. Nenhum dos dois usa capacete."
+    },
+    {
+      "id": "f09",
+      "file": "frames/f09.jpg",
+      "pessoas_esperadas": 1,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "Só a trabalhadora em primeiro plano, sem capacete. Ao fundo há um vulto laranja que não é pessoa identificável."
+    }
+  ]
+}
