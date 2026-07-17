@@ -79,6 +79,12 @@ def build_container(config: Settings | None = None, *, repository_backend: str |
         edge_worker_repository = InMemoryEdgeWorkerRepository()
         evidence_metadata_repository = InMemoryEvidenceMetadataRepository()
         operations_repository = InMemoryOperationsRepository()
+        # O repo em memória não conhece incidentes; injeta a checagem para que excluir
+        # câmera/zona com histórico seja barrado igual ao backend SQL.
+        operations_repository._incident_lookup = lambda kind, value: any(
+            (getattr(i, "camera_id", None) == value if kind == "camera" else getattr(i, "zone_id", None) == value)
+            for i in getattr(incident_repository, "incidents", {}).values()
+        )
     auth_service = AuthService(repository=auth_repository, config=config)
     evidence_service = EvidenceService(metadata_repository=evidence_metadata_repository)
     edge_worker_service = EdgeWorkerService(incident_repository=incident_repository, repository=edge_worker_repository, evidence_service=evidence_service, operations_repository=operations_repository)

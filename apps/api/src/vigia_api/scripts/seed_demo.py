@@ -195,7 +195,7 @@ def _ensure_operations_demo(container: AppContainer, org_id: str) -> dict[str, s
     zones = {zone.id: zone for zone in repo.list_zones(org_id)}
     for payload in BASE_ZONES:
         if payload["id"] not in zones:
-            zones[payload["id"]] = repo.create_zone(org_id, payload["site_id"], payload["camera_id"], zone_type=payload["zone_type"], polygon_json=payload.get("polygon") or {}, zone_id=payload["id"])
+            zones[payload["id"]] = repo.create_zone(org_id, payload["site_id"], payload["camera_id"], zone_type=payload["zone_type"], polygon_json=payload.get("polygon") or {}, zone_id=payload["id"], name=payload.get("name"))
 
     workers = {worker.id: worker for worker in repo.list_workers(org_id)}
     for payload in BASE_WORKERS:

@@ -12,6 +12,14 @@ class EntityStatus(StrEnum):
     SUSPENDED = "suspended"
 
 
+class OperationInUse(Exception):
+    """Cadastro não pode ser excluído porque há histórico apontando para ele.
+
+    Incidente guarda `camera_id`/`zone_id` como texto (sem FK), então apagar deixaria a
+    auditoria referenciando o nada. Nesses casos o caminho é desativar, não excluir.
+    """
+
+
 class ZoneType(StrEnum):
     ACCESS = "access"
     RESTRICTED = "restricted"
@@ -75,6 +83,8 @@ class Zone:
     camera_id: str
     zone_type: ZoneType
     polygon_json: dict[str, Any]
+    # Nome que o operador deu à área ("Porta da Doca"): sem ele, o alerta mostraria o id.
+    name: str | None = None
     status: EntityStatus = EntityStatus.ACTIVE
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

@@ -35,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ...container import default_container
 from ...domain.auth import Permission
-from ...domain.operations import EntityStatus, ZoneType, validate_stream_identifier
+from ...domain.operations import EntityStatus, OperationInUse, ZoneType, validate_stream_identifier
 from ...settings import settings
 from ...security.csrf import require_csrf
 from ...security.origin import validate_origin_or_referer
@@ -79,6 +79,8 @@ class ZoneIn(BaseModel):
     site_id: str
     camera_id: str
     zone_type: ZoneType
+    # Nome da área como ela é conhecida na planta ("Porta da Doca").
+    name: str | None = Field(default=None, max_length=120)
     polygon_json: dict[str, Any] = Field(default_factory=dict)
     status: EntityStatus = EntityStatus.ACTIVE
 
@@ -101,7 +103,7 @@ def _camera_metadata_with_source(stream_identifier: str, metadata: dict[str, Any
 
 
 def _serialize_zone_entity(zone) -> dict[str, Any]:
-    return {"id": zone.id, "organization_id": zone.organization_id, "site_id": zone.site_id, "camera_id": zone.camera_id, "zone_type": zone.zone_type.value, "polygon_json": zone.polygon_json, "status": zone.status.value}
+    return {"id": zone.id, "organization_id": zone.organization_id, "site_id": zone.site_id, "camera_id": zone.camera_id, "zone_type": zone.zone_type.value, "name": zone.name, "polygon_json": zone.polygon_json, "status": zone.status.value}
 
 
 def _key_error_status(exc: KeyError) -> int:
@@ -136,13 +138,15 @@ def _serialize_catalog(operations_repo, organization_id: str) -> dict[str, Any]:
 
     serial_cameras = []
     for camera in cameras:
-        payload = {"id": camera.id, "organization_id": camera.organization_id, "site_id": camera.site_id, "name": camera.name, "stream_identifier": camera.stream_identifier, "status": camera.status.value}
+        payload = _serialize_camera_entity(camera)
         serial_cameras.append(payload)
         cameras_by_site.setdefault(camera.site_id, []).append(payload)
 
     serial_zones = []
     for zone in zones:
-        payload = {"id": zone.id, "organization_id": zone.organization_id, "site_id": zone.site_id, "camera_id": zone.camera_id, "zone_type": zone.zone_type.value, "status": zone.status.value}
+        # Mesmo serializer dos demais endpoints: montar o payload à mão aqui já fez o
+        # catálogo esquecer `name` e `polygon_json`, e a tela mostrava o id cru.
+        payload = _serialize_zone_entity(zone)
         serial_zones.append(payload)
         zones_by_site.setdefault(zone.site_id, []).append(payload)
 
@@ -224,7 +228,7 @@ def create_zone(organization_id: str, payload: ZoneIn, request: Request, members
     validate_origin_or_referer(request)
     _assert_organization_access(organization_id, membership)
     try:
-        return {"zone": _serialize_zone_entity(_service(request).create_zone(organization_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status))}
+        return {"zone": _serialize_zone_entity(_service(request).create_zone(organization_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status, name=payload.name))}
     except KeyError as exc:
         raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
     except ValueError as exc:
@@ -236,7 +240,7 @@ def update_zone(organization_id: str, zone_id: str, payload: ZoneIn, request: Re
     validate_origin_or_referer(request)
     _assert_organization_access(organization_id, membership)
     try:
-        return {"zone": _serialize_zone_entity(_service(request).update_zone(organization_id, zone_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status))}
+        return {"zone": _serialize_zone_entity(_service(request).update_zone(organization_id, zone_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status, name=payload.name))}
     except KeyError as exc:
         raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
     except ValueError as exc:
@@ -271,3 +275,37 @@ def list_safety_rules(organization_id: str, request: Request, membership=Depends
 def list_required_ppe(organization_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
     _assert_organization_access(organization_id, membership)
     return {"items": _serialize_catalog(_service(request), organization_id)["required_ppe"]}
+
+
+@router.delete("/organizations/{organization_id}/operations/zones/{zone_id}", status_code=204, dependencies=[Depends(require_permission("zones.manage")), Depends(require_csrf)])
+def delete_zone(organization_id: str, zone_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> None:
+    _assert_organization_access(organization_id, membership)
+    try:
+        _service(request).delete_zone(organization_id, zone_id)
+    except OperationInUse as exc:
+        # 409: o cadastro existe, mas apagá-lo destruiria a rastreabilidade do histórico.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail="zone not found") from exc
+
+
+@router.delete("/organizations/{organization_id}/operations/cameras/{camera_id}", status_code=204, dependencies=[Depends(require_permission("cameras.manage")), Depends(require_csrf)])
+def delete_camera(organization_id: str, camera_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> None:
+    _assert_organization_access(organization_id, membership)
+    try:
+        _service(request).delete_camera(organization_id, camera_id)
+    except OperationInUse as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail="camera not found") from exc
+
+
+@router.delete("/organizations/{organization_id}/operations/sites/{site_id}", status_code=204, dependencies=[Depends(require_permission("sites.manage")), Depends(require_csrf)])
+def delete_site(organization_id: str, site_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> None:
+    _assert_organization_access(organization_id, membership)
+    try:
+        _service(request).delete_site(organization_id, site_id)
+    except OperationInUse as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail="site not found") from exc

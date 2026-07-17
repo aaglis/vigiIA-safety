@@ -125,7 +125,7 @@ class EdgeWorkerService:
                 if c.id in worker.allowed_camera_ids
             ]
             zones = [
-                {"id": z.id, "site_id": z.site_id, "camera_id": z.camera_id, "zone_type": z.zone_type.value, "status": z.status.value, "polygon_json": z.polygon_json}
+                {"id": z.id, "site_id": z.site_id, "camera_id": z.camera_id, "zone_type": z.zone_type.value, "name": z.name, "status": z.status.value, "polygon_json": z.polygon_json}
                 for z in ops.list_zones(worker.organization_id)
                 if z.site_id == worker.site_id
             ]

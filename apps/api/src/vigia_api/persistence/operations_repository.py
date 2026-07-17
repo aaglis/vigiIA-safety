@@ -4,12 +4,14 @@ import json
 from datetime import datetime, timezone
 
 try:
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 except Exception:  # pragma: no cover
     select = None  # type: ignore[assignment]
+    func = None  # type: ignore[assignment]
 
-from ..domain.operations import Camera, Department, EntityStatus, RequiredPPE, SafetyRule, Site, Worker, Zone, ZoneType
+from ..domain.operations import Camera, Department, EntityStatus, OperationInUse, RequiredPPE, SafetyRule, Site, Worker, Zone, ZoneType
 from .models import Camera as CameraRow
+from .models import Incident as IncidentRow
 from .models import Department as DepartmentRow
 from .models import RequiredPPE as RequiredPPERow
 from .models import SafetyRule as SafetyRuleRow
@@ -72,7 +74,7 @@ class SqlAlchemyOperationsRepository:
     def _zone_domain(self, row: ZoneRow | None) -> Zone | None:
         if row is None:
             return None
-        return Zone(id=row.id, organization_id=row.organization_id, site_id=row.site_id, camera_id=row.camera_id, zone_type=ZoneType(row.zone_type), polygon_json=json.loads(row.polygon_json or "{}"), status=EntityStatus(row.status), created_at=self._ensure_aware(row.created_at), updated_at=self._ensure_aware(row.updated_at))
+        return Zone(id=row.id, organization_id=row.organization_id, site_id=row.site_id, camera_id=row.camera_id, zone_type=ZoneType(row.zone_type), name=row.name, polygon_json=json.loads(row.polygon_json or "{}"), status=EntityStatus(row.status), created_at=self._ensure_aware(row.created_at), updated_at=self._ensure_aware(row.updated_at))
 
     def _rule_domain(self, row: SafetyRuleRow | None) -> SafetyRule | None:
         if row is None:
@@ -206,7 +208,7 @@ class SqlAlchemyOperationsRepository:
                     items.append(item)
             return items
 
-    def create_zone(self, organization_id: str, site_id: str, camera_id: str, zone_type: ZoneType, polygon_json: dict, status: EntityStatus = EntityStatus.ACTIVE, zone_id: str | None = None) -> Zone:
+    def create_zone(self, organization_id: str, site_id: str, camera_id: str, zone_type: ZoneType, polygon_json: dict, status: EntityStatus = EntityStatus.ACTIVE, zone_id: str | None = None, name: str | None = None) -> Zone:
         site = self._site_domain(self._load_one(SiteRow, site_id))
         camera = self._camera_domain(self._load_one(CameraRow, camera_id))
         if site is None or camera is None:
@@ -215,11 +217,11 @@ class SqlAlchemyOperationsRepository:
         self._assert_org(organization_id, camera.organization_id)
         if camera.site_id != site_id:
             raise ValueError("camera must belong to site")
-        zone = Zone(id=zone_id or f"zone-{zone_type.value}-{len(self.list_zones(organization_id))+1}", organization_id=organization_id, site_id=site_id, camera_id=camera_id, zone_type=zone_type, polygon_json=polygon_json, status=status)
-        self._save(ZoneRow(id=zone.id, organization_id=zone.organization_id, site_id=zone.site_id, camera_id=zone.camera_id, zone_type=zone.zone_type.value, polygon_json=json.dumps(zone.polygon_json), status=zone.status.value, created_at=zone.created_at, updated_at=zone.updated_at))
+        zone = Zone(id=zone_id or f"zone-{zone_type.value}-{len(self.list_zones(organization_id))+1}", organization_id=organization_id, site_id=site_id, camera_id=camera_id, zone_type=zone_type, polygon_json=polygon_json, status=status, name=name)
+        self._save(ZoneRow(id=zone.id, organization_id=zone.organization_id, site_id=zone.site_id, camera_id=zone.camera_id, zone_type=zone.zone_type.value, name=zone.name, polygon_json=json.dumps(zone.polygon_json), status=zone.status.value, created_at=zone.created_at, updated_at=zone.updated_at))
         return zone
 
-    def update_zone(self, organization_id: str, zone_id: str, site_id: str | None = None, camera_id: str | None = None, zone_type: ZoneType | None = None, polygon_json: dict | None = None, status: EntityStatus | None = None) -> Zone:
+    def update_zone(self, organization_id: str, zone_id: str, site_id: str | None = None, camera_id: str | None = None, zone_type: ZoneType | None = None, polygon_json: dict | None = None, status: EntityStatus | None = None, name: str | None = None) -> Zone:
         zone = self._zone_domain(self._load_one(ZoneRow, zone_id))
         if zone is None:
             raise KeyError(zone_id)
@@ -244,8 +246,10 @@ class SqlAlchemyOperationsRepository:
             zone.polygon_json = dict(polygon_json)
         if status is not None:
             zone.status = status
+        if name is not None:
+            zone.name = name.strip() or None
         zone.updated_at = self._now()
-        self._save(ZoneRow(id=zone.id, organization_id=zone.organization_id, site_id=zone.site_id, camera_id=zone.camera_id, zone_type=zone.zone_type.value, polygon_json=json.dumps(zone.polygon_json), status=zone.status.value, created_at=zone.created_at, updated_at=zone.updated_at))
+        self._save(ZoneRow(id=zone.id, organization_id=zone.organization_id, site_id=zone.site_id, camera_id=zone.camera_id, zone_type=zone.zone_type.value, name=zone.name, polygon_json=json.dumps(zone.polygon_json), status=zone.status.value, created_at=zone.created_at, updated_at=zone.updated_at))
         return zone
 
     def list_zones(self, organization_id: str) -> list[Zone]:
@@ -314,3 +318,55 @@ class SqlAlchemyOperationsRepository:
                 if item is not None:
                     items.append(item)
             return items
+
+    def _incident_count(self, column, value: str) -> int:
+        if select is None:
+            return 0
+        with self.session_factory() as session:
+            return int(session.execute(select(func.count()).select_from(IncidentRow).where(column == value)).scalar() or 0)
+
+    def delete_zone(self, organization_id: str, zone_id: str) -> None:
+        """Zona com incidente no histórico não é apagada: o incidente guarda `zone_id`
+        como texto (sem FK), então apagar deixaria a auditoria apontando para o nada.
+        Nesse caso o caminho é desativar (`status`), que preserva a prova."""
+        zone = self._zone_domain(self._load_one(ZoneRow, zone_id))
+        if zone is None:
+            raise KeyError(zone_id)
+        self._assert_org(organization_id, zone.organization_id)
+        if self._incident_count(IncidentRow.zone_id, zone_id) > 0:
+            raise OperationInUse("zone has incidents")
+        with self.session_factory() as session:
+            row = session.get(ZoneRow, zone_id)
+            if row is not None:
+                session.delete(row)
+                session.commit()
+
+    def delete_camera(self, organization_id: str, camera_id: str) -> None:
+        """Idem câmera. Cuidado extra: a FK de `zones.camera_id` é CASCADE, então apagar
+        a câmera levaria as zonas junto — mais um motivo para barrar quando há histórico."""
+        camera = self._camera_domain(self._load_one(CameraRow, camera_id))
+        if camera is None:
+            raise KeyError(camera_id)
+        self._assert_org(organization_id, camera.organization_id)
+        if self._incident_count(IncidentRow.camera_id, camera_id) > 0:
+            raise OperationInUse("camera has incidents")
+        with self.session_factory() as session:
+            row = session.get(CameraRow, camera_id)
+            if row is not None:
+                session.delete(row)
+                session.commit()
+
+    def delete_site(self, organization_id: str, site_id: str) -> None:
+        """Unidade só sai vazia: a FK é CASCADE e apagar levaria câmeras e zonas junto,
+        silenciosamente."""
+        site = self._site_domain(self._load_one(SiteRow, site_id))
+        if site is None:
+            raise KeyError(site_id)
+        self._assert_org(organization_id, site.organization_id)
+        if any(camera.site_id == site_id for camera in self.list_cameras(organization_id)):
+            raise OperationInUse("site has cameras")
+        with self.session_factory() as session:
+            row = session.get(SiteRow, site_id)
+            if row is not None:
+                session.delete(row)
+                session.commit()

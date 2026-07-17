@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from ..domain.operations import (
     Camera,
     Department,
     EntityStatus,
+    OperationInUse,
     OperationalAuditLog,
     RequiredPPE,
     SafetyRule,
@@ -17,7 +19,12 @@ from ..domain.operations import (
 
 
 class InMemoryOperationsRepository:
+    """Espelha a interface do repositório SQL. `incident_lookup` responde se há
+    histórico apontando para uma câmera/zona — em memória não há tabela de incidentes,
+    então quem monta o container injeta a checagem."""
+
     def __init__(self) -> None:
+        self._incident_lookup: Any | None = None
         self.sites: dict[str, Site] = {}
         self.departments: dict[str, Department] = {}
         self.workers: dict[str, Worker] = {}
@@ -99,18 +106,18 @@ class InMemoryOperationsRepository:
         camera.updated_at = self._now()
         return camera
 
-    def create_zone(self, organization_id: str, site_id: str, camera_id: str, zone_type: ZoneType, polygon_json: dict, status: EntityStatus = EntityStatus.ACTIVE, zone_id: str | None = None) -> Zone:
+    def create_zone(self, organization_id: str, site_id: str, camera_id: str, zone_type: ZoneType, polygon_json: dict, status: EntityStatus = EntityStatus.ACTIVE, zone_id: str | None = None, name: str | None = None) -> Zone:
         site = self.sites[site_id]
         camera = self.cameras[camera_id]
         self._assert_org(organization_id, site.organization_id)
         self._assert_org(organization_id, camera.organization_id)
         if camera.site_id != site_id:
             raise ValueError("camera must belong to site")
-        zone = Zone(id=zone_id or f"zone-{len(self.zones)+1}", organization_id=organization_id, site_id=site_id, camera_id=camera_id, zone_type=zone_type, polygon_json=polygon_json, status=status)
+        zone = Zone(id=zone_id or f"zone-{len(self.zones)+1}", organization_id=organization_id, site_id=site_id, camera_id=camera_id, zone_type=zone_type, polygon_json=polygon_json, status=status, name=name)
         self.zones[zone.id] = zone
         return zone
 
-    def update_zone(self, organization_id: str, zone_id: str, site_id: str | None = None, camera_id: str | None = None, zone_type: ZoneType | None = None, polygon_json: dict | None = None, status: EntityStatus | None = None) -> Zone:
+    def update_zone(self, organization_id: str, zone_id: str, site_id: str | None = None, camera_id: str | None = None, zone_type: ZoneType | None = None, polygon_json: dict | None = None, status: EntityStatus | None = None, name: str | None = None) -> Zone:
         zone = self.zones[zone_id]
         self._assert_org(organization_id, zone.organization_id)
         if site_id is not None:
@@ -131,6 +138,8 @@ class InMemoryOperationsRepository:
             zone.polygon_json = dict(polygon_json)
         if status is not None:
             zone.status = status
+        if name is not None:
+            zone.name = name.strip() or None
         zone.updated_at = self._now()
         return zone
 
@@ -186,3 +195,30 @@ class InMemoryOperationsRepository:
 
     def list_required_ppe(self, organization_id: str) -> list[RequiredPPE]:
         return [ppe for ppe in self.required_ppe.values() if ppe.organization_id == organization_id]
+
+    def delete_zone(self, organization_id: str, zone_id: str) -> None:
+        zone = self.zones.get(zone_id)
+        if zone is None or zone.organization_id != organization_id:
+            raise KeyError(zone_id)
+        if self._incident_lookup and self._incident_lookup("zone", zone_id):
+            raise OperationInUse("zone has incidents")
+        self.zones.pop(zone_id, None)
+
+    def delete_camera(self, organization_id: str, camera_id: str) -> None:
+        camera = self.cameras.get(camera_id)
+        if camera is None or camera.organization_id != organization_id:
+            raise KeyError(camera_id)
+        if self._incident_lookup and self._incident_lookup("camera", camera_id):
+            raise OperationInUse("camera has incidents")
+        # Espelha o CASCADE do banco: zona sem câmera não faz sentido.
+        for zid in [z.id for z in self.zones.values() if z.camera_id == camera_id]:
+            self.zones.pop(zid, None)
+        self.cameras.pop(camera_id, None)
+
+    def delete_site(self, organization_id: str, site_id: str) -> None:
+        site = self.sites.get(site_id)
+        if site is None or site.organization_id != organization_id:
+            raise KeyError(site_id)
+        if any(c.site_id == site_id for c in self.cameras.values()):
+            raise OperationInUse("site has cameras")
+        self.sites.pop(site_id, None)
