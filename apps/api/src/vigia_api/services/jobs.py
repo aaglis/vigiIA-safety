@@ -8,6 +8,7 @@ from ..settings import Settings, settings
 from .edge_workers import EdgeWorkerService
 from .evidence import EvidenceService
 from .incidents import InMemoryIncidentRepository
+from .notifications import NotificationSendError, Notifier, _sanitize_error, build_incident_email, build_notifier, is_resend_configured
 
 
 def _worker_to_job_result(worker: Any) -> dict[str, Any]:
@@ -23,11 +24,24 @@ def _worker_to_job_result(worker: Any) -> dict[str, Any]:
 
 
 class OperationalJobsService:
-    def __init__(self, edge_worker_service: EdgeWorkerService, evidence_service: EvidenceService, incident_repository: Any, app_settings: Settings | None = None) -> None:
+    def __init__(self, edge_worker_service: EdgeWorkerService, evidence_service: EvidenceService, incident_repository: Any, app_settings: Settings | None = None, notifier: Notifier | None = None) -> None:
         self.edge_worker_service = edge_worker_service
         self.evidence_service = evidence_service
         self.incident_repository = incident_repository
         self.settings = app_settings or settings
+        self.notifier = notifier or build_notifier(self.settings)
+
+    def _deliver(self, attempt: Any) -> tuple[str, str | None]:
+        """Envia a notificação de fato. Falha de envio nunca derruba o job nem o incidente."""
+        incident = self.incident_repository.get(attempt.organization_id, attempt.incident_id) if hasattr(self.incident_repository, "get") else None
+        subject, body = build_incident_email(incident) if incident is not None else (f"[VigIA] Incidente {attempt.incident_id}", f"Incidente {attempt.incident_id}")
+        try:
+            self.notifier.send(subject=subject, body=body, recipients=list(self.settings.incident_notification_recipients))
+            return "sent", None
+        except NotificationSendError as exc:
+            return "failed", str(exc)
+        except Exception as exc:  # defensivo: qualquer erro inesperado vira falha registrada
+            return "failed", _sanitize_error(exc, getattr(self.settings, "resend_api_key", None))
 
     def run_offline_workers(self, organization_id: str | None = None, threshold_seconds: int = 300, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(timezone.utc)
@@ -61,13 +75,15 @@ class OperationalJobsService:
         for attempt in queued:
             next_status = "sent"
             error = None
-            if attempt.channel == "email" and self.settings.incident_notification_mode.strip().lower() == "smtp":
+            if attempt.channel == "email" and self.settings.incident_notification_mode.strip().lower() == "resend":
                 if not self.settings.incident_notification_enabled:
                     next_status = "suppressed"
                     error = "disabled"
-                elif self.settings.smtp_host.startswith("smtp.dev.local") or self.settings.smtp_user in {"dev-only", ""} or self.settings.smtp_password in {"dev-only", ""}:
+                elif not is_resend_configured(self.settings):
                     next_status = "failed"
-                    error = "smtp_misconfigured"
+                    error = "resend_misconfigured"
+                else:
+                    next_status, error = self._deliver(attempt)
             if hasattr(repo, "update_notification_status"):
                 updated = repo.update_notification_status(attempt.id, next_status, processed_at=now, error=error)
             else:
