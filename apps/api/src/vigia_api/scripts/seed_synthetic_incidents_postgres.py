@@ -37,6 +37,32 @@ def _measure(label: str, fn) -> dict[str, Any]:
     return {"label": label, "elapsed_ms": elapsed_ms, "items": size}
 
 
+def ensure_synthetic_catalog(session_factory, organization_id: str = ORG_ID) -> None:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with session_factory() as session:
+        if session.get(models.Organization, organization_id) is None:
+            session.add(models.Organization(id=organization_id, name="VigIA Sintético", legal_name="VigIA Sintético", tax_id=f"synthetic-{organization_id}", status="active", retention_days=365, created_at=now, updated_at=now))
+        session.commit()
+
+        for site_id in SITES:
+            if session.get(models.Site, site_id) is None:
+                session.add(models.Site(id=site_id, organization_id=organization_id, name=site_id.replace("-", " ").title(), address="Ambiente sintético", status="active", created_at=now, updated_at=now))
+        session.commit()
+
+        for index, camera_id in enumerate(CAMERAS):
+            site_id = SITES[index % len(SITES)]
+            if session.get(models.Camera, camera_id) is None:
+                session.add(models.Camera(id=camera_id, organization_id=organization_id, site_id=site_id, name=camera_id.replace("-", " ").title(), stream_identifier=f"synthetic://{camera_id}", status="active", metadata_json='{"synthetic": true}', created_at=now, updated_at=now))
+        session.commit()
+
+        for index, zone_id in enumerate(ZONES):
+            site_id = SITES[index % len(SITES)]
+            camera_id = CAMERAS[index % len(CAMERAS)]
+            if session.get(models.Zone, zone_id) is None:
+                session.add(models.Zone(id=zone_id, organization_id=organization_id, site_id=site_id, camera_id=camera_id, zone_type="restricted" if index % 2 == 0 else "ppe", polygon_json='{"synthetic": true}', status="active", created_at=now, updated_at=now))
+        session.commit()
+
+
 def seed_synthetic_incidents_postgres(session_factory, count: int = 1000, *, organization_id: str = ORG_ID, days: int = 30, with_evidence_every: int = 25) -> tuple[SqlAlchemyIncidentRepository, EvidenceService, list[Incident]]:
     repo = SqlAlchemyIncidentRepository(session_factory)
     evidence_service = EvidenceService(storage=MockEvidenceStorage(bucket_name="vigia-evidence-private"), metadata_repository=SqlAlchemyEvidenceRepository(session_factory))
@@ -68,6 +94,7 @@ def run_baseline_postgres(database_url: str, count: int = 1000, *, organization_
     engine = create_engine(database_url, pool_pre_ping=True, future=True)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    ensure_synthetic_catalog(Session, organization_id)
     repo, evidence_service, incidents = seed_synthetic_incidents_postgres(Session, count=count, organization_id=organization_id, days=days)
     selected = incidents[count // 2]
     recent_from = datetime.now(timezone.utc) - timedelta(days=7)

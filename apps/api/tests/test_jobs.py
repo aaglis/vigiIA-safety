@@ -7,6 +7,7 @@ from vigia_api.services.edge_workers import EdgeWorkerService
 from vigia_api.services.evidence import EvidenceService
 from vigia_api.services.jobs import OperationalJobsService
 from vigia_api.services.incidents import InMemoryIncidentRepository
+from vigia_api.services.notifications import NotificationSendError
 from vigia_api.settings import Settings
 
 
@@ -50,7 +51,7 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(second["count"], 0)
         self.assertEqual(self.incidents.notifications("org-1", incident.id)[0].status, "sent")
 
-    def test_smtp_disabled_or_misconfigured_is_recorded_without_blocking_incident(self) -> None:
+    def test_disabled_or_misconfigured_resend_is_recorded_without_blocking_incident(self) -> None:
         disabled_settings = Settings(incident_notification_enabled=False)
         disabled_repo = InMemoryIncidentRepository(app_settings=disabled_settings)
         disabled_repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "critical"}))
@@ -59,19 +60,49 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(result["count"], 0)
         self.assertEqual(disabled_repo.list_notifications("org-1")[0].status, "suppressed")
 
-        smtp_settings = Settings(
-            incident_notification_mode="smtp",
-            smtp_host="smtp.example.com",
-            smtp_user="dev-only",
-            smtp_password="dev-only",
-            smtp_from="alerts@example.com",
-        )
-        smtp_repo = InMemoryIncidentRepository(app_settings=smtp_settings)
-        incident = smtp_repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "critical"}))
-        smtp_jobs = OperationalJobsService(self.edge_workers, self.evidence, smtp_repo, app_settings=smtp_settings)
-        smtp_jobs.run_notifications("org-1", incident_id=incident.id)
-        self.assertEqual(smtp_repo.notifications("org-1", incident.id)[0].status, "failed")
-        self.assertEqual(smtp_repo.notifications("org-1", incident.id)[0].payload["reason"], "smtp_misconfigured")
+        # modo resend sem chave real => falha registrada, incidente segue criado
+        resend_settings = Settings(incident_notification_mode="resend", resend_api_key="", notification_from="alerts@example.com")
+        resend_repo = InMemoryIncidentRepository(app_settings=resend_settings)
+        incident = resend_repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "critical"}))
+        resend_jobs = OperationalJobsService(self.edge_workers, self.evidence, resend_repo, app_settings=resend_settings)
+        resend_jobs.run_notifications("org-1", incident_id=incident.id)
+        self.assertEqual(resend_repo.notifications("org-1", incident.id)[0].status, "failed")
+        self.assertEqual(resend_repo.notifications("org-1", incident.id)[0].payload["reason"], "resend_misconfigured")
+
+    def test_resend_delivery_success_and_failure_are_recorded(self) -> None:
+        configured = Settings(incident_notification_mode="resend", resend_api_key="re_live_abc123456789", notification_from="alerts@example.com")
+
+        class OkNotifier:
+            channel = "email"
+
+            def __init__(self) -> None:
+                self.sent: list[dict] = []
+
+            def send(self, *, subject, body, recipients):
+                self.sent.append({"subject": subject, "recipients": recipients})
+
+        repo = InMemoryIncidentRepository(app_settings=configured)
+        incident = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "critical"}))
+        notifier = OkNotifier()
+        jobs = OperationalJobsService(self.edge_workers, self.evidence, repo, app_settings=configured, notifier=notifier)
+        jobs.run_notifications("org-1", incident_id=incident.id)
+        self.assertEqual(repo.notifications("org-1", incident.id)[0].status, "sent")
+        self.assertEqual(len(notifier.sent), 1)
+        self.assertIn("CRITICAL", notifier.sent[0]["subject"])
+
+        class FailingNotifier:
+            channel = "email"
+
+            def send(self, *, subject, body, recipients):
+                raise NotificationSendError("resend api error 422")
+
+        repo2 = InMemoryIncidentRepository(app_settings=configured)
+        incident2 = repo2.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-2", "zone_id": "zone-1", "severity": "critical"}))
+        jobs2 = OperationalJobsService(self.edge_workers, self.evidence, repo2, app_settings=configured, notifier=FailingNotifier())
+        jobs2.run_notifications("org-1", incident_id=incident2.id)
+        attempt = repo2.notifications("org-1", incident2.id)[0]
+        self.assertEqual(attempt.status, "failed")
+        self.assertIn("422", str(attempt.payload))
 
 
 if __name__ == "__main__":

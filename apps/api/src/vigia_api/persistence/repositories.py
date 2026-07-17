@@ -13,15 +13,27 @@ except Exception:  # pragma: no cover
 from ..domain.edge_workers import EdgeWorker, EdgeWorkerStatus
 from ..domain.evidence import EvidenceAccessAuditLog
 from ..domain.incidents import AuditLogEntry, DetectionEvent, Incident, IncidentStatus, NotificationAttempt, new_id
+from ..services.notifications import is_resend_configured
+from ..settings import settings as global_settings
 from .models import EdgeWorker as EdgeWorkerRow
 from .models import EvidenceAccessAuditLog as EvidenceAccessAuditLogRow
 from .models import EvidenceMetadata as EvidenceMetadataRow
 from .models import Incident as IncidentRow
+from .models import NotificationAttempt as NotificationRow
+
+SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _is_notifiable_severity(severity: str, settings_obj: Any) -> bool:
+    normalized = severity.strip().lower()
+    threshold = settings_obj.incident_notification_severity_threshold.strip().lower()
+    return SEVERITY_ORDER.get(normalized, 0) >= SEVERITY_ORDER.get(threshold, 3)
 
 
 class SqlAlchemyIncidentRepository:
-    def __init__(self, session_factory) -> None:
+    def __init__(self, session_factory, app_settings: Any | None = None) -> None:
         self.session_factory = session_factory
+        self.settings = app_settings or global_settings
 
     def _ensure_aware_utc(self, value: datetime | None, default_now: bool = False) -> datetime | None:
         if value is None:
@@ -115,7 +127,67 @@ class SqlAlchemyIncidentRepository:
         )
         self.save(incident)
         self._append_audit_log(incident.organization_id, incident.id, "created", None, incident.status.value, "system", incident.created_at, {"detection_event_id": event.event_id})
+        self._enqueue_notification(incident)
         return incident
+
+    def _enqueue_notification(self, incident: Incident) -> None:
+        if not _is_notifiable_severity(incident.severity, self.settings):
+            return
+        from ..observability import log_event
+
+        mode = self.settings.incident_notification_mode.strip().lower()
+        enabled = bool(self.settings.incident_notification_enabled)
+        status = "queued"
+        channel = "email" if mode == "resend" else "mock"
+        payload: dict[str, Any] = {"severity": incident.severity, "channel": channel, "mode": mode, "recipients": len(self.settings.incident_notification_recipients)}
+        if not enabled:
+            status = "suppressed"
+            payload["reason"] = "disabled"
+        elif mode == "resend" and not is_resend_configured(self.settings):
+            status = "failed"
+            payload["reason"] = "resend_misconfigured"
+        with self.session_factory() as session:
+            session.add(NotificationRow(id=new_id(), organization_id=incident.organization_id, incident_id=incident.id, channel=channel, status=status, payload_json=json.dumps(payload), created_at=datetime.now(timezone.utc)))
+            session.commit()
+        log_event("incident.notification_attempt", organization_id=incident.organization_id, incident_id=incident.id, channel=channel, status=status, severity=incident.severity, recipients=len(self.settings.incident_notification_recipients))
+
+    def _notification_to_domain(self, row: NotificationRow) -> NotificationAttempt:
+        payload = json.loads(row.payload_json or "{}")
+        if row.processed_at is not None:
+            payload = {**payload, "processed_at": self._ensure_aware_utc(row.processed_at).isoformat()}
+        return NotificationAttempt(id=row.id, organization_id=row.organization_id, incident_id=row.incident_id, channel=row.channel, status=row.status, created_at=self._ensure_aware_utc(row.created_at, default_now=True), payload=payload)
+
+    def notifications(self, organization_id: str, incident_id: str) -> list[NotificationAttempt]:
+        if self.session_factory is None or select is None:
+            return []
+        with self.session_factory() as session:
+            rows = session.execute(select(NotificationRow).where(NotificationRow.organization_id == organization_id, NotificationRow.incident_id == incident_id)).scalars().all()
+            return [self._notification_to_domain(row) for row in rows]
+
+    def list_notifications(self, organization_id: str, status: str | None = None) -> list[NotificationAttempt]:
+        if self.session_factory is None or select is None:
+            return []
+        with self.session_factory() as session:
+            stmt = select(NotificationRow).where(NotificationRow.organization_id == organization_id)
+            if status is not None:
+                stmt = stmt.where(NotificationRow.status == status)
+            return [self._notification_to_domain(row) for row in session.execute(stmt).scalars().all()]
+
+    def update_notification_status(self, notification_id: str, status: str, *, processed_at: datetime | None = None, error: str | None = None) -> NotificationAttempt:
+        with self.session_factory() as session:
+            row = session.get(NotificationRow, notification_id)
+            if row is None:
+                raise KeyError(notification_id)
+            row.status = status
+            row.processed_at = processed_at or datetime.now(timezone.utc)
+            if error is not None:
+                payload = json.loads(row.payload_json or "{}")
+                payload["error"] = error
+                payload.setdefault("reason", error)
+                row.payload_json = json.dumps(payload)
+            session.commit()
+            session.refresh(row)
+            return self._notification_to_domain(row)
 
     def get_by_detection_event(self, organization_id: str, detection_event_id: str) -> Incident | None:
         if self.session_factory is None or select is None:

@@ -3,6 +3,7 @@ import unittest
 from vigia_api.domain.auth import AuthenticatedUser, MembershipSummary, OrganizationSummary, Permission, PlatformRole, User
 from vigia_api.api.v1 import evidence as evidence_api
 from vigia_api.security.dependencies import get_current_organization_membership
+from vigia_api.security.rate_limit import rate_limiter
 
 try:
     from fastapi.testclient import TestClient  # type: ignore[import-not-found]
@@ -15,6 +16,7 @@ except Exception:  # pragma: no cover - optional FastAPI test dependency
 
 class RbacDependenciesTest(unittest.TestCase):
     def setUp(self) -> None:
+        rate_limiter._windows.clear()
         org = OrganizationSummary(id="org-1", name="Org 1", slug="org-1")
         self.membership = MembershipSummary(organization=org, role="org_owner", permissions=[Permission.VIEW_DASHBOARD, Permission.MANAGE_USERS, Permission.MANAGE_ORG], active=True)
         self.user = AuthenticatedUser(user=User(id="user-1", email="admin@example.com", full_name="Admin", password_hash="x", platform_role=PlatformRole.NONE), memberships=[self.membership])
@@ -44,7 +46,7 @@ class RbacDependenciesTest(unittest.TestCase):
 
         evidence_api.service.get_download_url = fake_get_download_url  # type: ignore[assignment]
         try:
-            result = evidence_api.download_url("org-1", "inc-1", "file-1", request=Request(), current_user=self.user)
+            result = evidence_api.download_url("org-1", "inc-1", "file-1", request=Request(), current_user=self.user)  # type: ignore[arg-type]
             self.assertEqual(result, {"ok": True})
             self.assertEqual(captured["actor_user_id"], "user-1")
         finally:

@@ -117,7 +117,13 @@ class EdgeWorkerService:
         zones = []
         safety_rules = []
         required_ppe = []
+        cameras = []
         if ops is not None:
+            cameras = [
+                {"id": c.id, "site_id": c.site_id, "name": c.name, "stream_identifier": c.stream_identifier, "status": c.status.value, "metadata": c.metadata}
+                for c in ops.list_cameras(worker.organization_id)
+                if c.id in worker.allowed_camera_ids
+            ]
             zones = [
                 {"id": z.id, "site_id": z.site_id, "camera_id": z.camera_id, "zone_type": z.zone_type.value, "status": z.status.value, "polygon_json": z.polygon_json}
                 for z in ops.list_zones(worker.organization_id)
@@ -142,6 +148,7 @@ class EdgeWorkerService:
             "worker": self._serialize_worker(worker),
             "capabilities": ["heartbeat", "publish_detection", "request_evidence_upload"],
             "allowed_camera_ids": worker.allowed_camera_ids,
+            "cameras": cameras,
             "site_id": worker.site_id,
             "zones": zones,
             "safety_rules": safety_rules,
