@@ -5,6 +5,7 @@ from vigia_api.domain.auth import MembershipSummary, OrganizationSummary, Permis
 from vigia_api.domain.edge_workers import EdgeWorker
 from vigia_api.services.security import hash_token
 from vigia_api.settings import settings
+from vigia_api.security.rate_limit import rate_limiter
 
 try:
     from fastapi.testclient import TestClient  # type: ignore[import-not-found]
@@ -20,6 +21,7 @@ ORIGIN_HEADERS = {"Origin": "http://localhost:3000", "Referer": "http://localhos
 
 class MainFlowHttpTest(unittest.TestCase):
     def setUp(self) -> None:
+        rate_limiter._windows.clear()
         if TestClient is None:
             self.skipTest("fastapi test client unavailable")
         assert create_app is not None

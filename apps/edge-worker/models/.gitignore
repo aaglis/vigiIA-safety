@@ -1,0 +1,4 @@
+*.pt
+*.onnx
+*.engine
+!README.md

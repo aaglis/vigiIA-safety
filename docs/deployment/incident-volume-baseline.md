@@ -65,4 +65,4 @@ Se o runner apontar consultas acima desse alvo, investigar antes do beta:
 
 O runner atual usa repositório in-memory para baseline leve. Antes de cliente beta, repetir validação em staging/PostgreSQL com dados sintéticos aprovados e comparar latência real de API, banco e frontend.
 
-O runner PostgreSQL cria as tabelas se necessário e mede os mesmos caminhos de listagem/filtros/detalhe/auditoria/evidência com 1k+ incidentes sintéticos. Se houver regressão, os primeiros candidatos são índices por `organization_id + created_at`, `organization_id + status + severity` e os filtros mais usados pelo cliente.
+O runner PostgreSQL cria as tabelas se necessário, prepara um catálogo sintético mínimo (`org-demo`, sites, câmeras e zonas fake) e mede os mesmos caminhos de listagem/filtros/detalhe/auditoria/evidência com 1k+ incidentes sintéticos. Se houver regressão, os primeiros candidatos são índices por `organization_id + created_at`, `organization_id + status + severity` e os filtros mais usados pelo cliente.

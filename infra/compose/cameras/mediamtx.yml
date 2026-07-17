@@ -1,0 +1,42 @@
+logLevel: info
+
+# Servidor de mídia que faz o papel das CÂMERAS da planta. Em produção isto não é nosso:
+# são as câmeras IP do cliente publicando RTSP. Aqui, cada vídeo da pasta vira uma câmera.
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+webrtc: yes
+webrtcAddress: :8889
+# Navegador e câmera estão na mesma rede (LAN do cliente) — sem ICE server externo.
+webrtcICEServers2: []
+
+hls: no
+rtmp: no
+srt: no
+api: no
+
+# Quem pode LER é decidido pelo cloud (ticket assinado de curta duração).
+# O publish é local (o ffmpeg deste container), então fica fora do gate.
+authMethod: http
+authHTTPAddress: http://api:8000/api/v1/internal/stream-auth
+authHTTPExclude:
+  - action: publish
+
+paths:
+  # Qualquer arquivo em /videos vira câmera: `cam-<nome-do-arquivo>`.
+  #   videos/patio-sul.mp4  ->  rtsp://cameras:8554/cam-patio-sul
+  # Não precisa editar este arquivo para adicionar câmera — basta soltar o .mp4 na pasta.
+  #
+  # runOnDemand (e não runOnInit): o ffmpeg só sobe quando alguém pede o stream, então
+  # câmera que ninguém assiste nem o worker analisa não gasta CPU.
+  "~^cam-(.+)$":
+    runOnDemand: >
+      ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /videos/$G1.mp4
+      -vf scale=1280:-2 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+      -g 30 -an -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam-$G1
+    runOnDemandRestart: yes
+    # Segura o ffmpeg por um tempo após o último leitor sair, para reconexão do worker
+    # não ficar reiniciando o encoder toda hora.
+    runOnDemandCloseAfter: 30s
+    runOnDemandStartTimeout: 15s

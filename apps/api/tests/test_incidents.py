@@ -38,7 +38,7 @@ class IncidentsTest(unittest.TestCase):
         incident = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "camera_id": "cam-7", "zone_id": "zone-a", "severity": "critical", "summary": "Sensitive detail token-abc-123"}))
         attempt = repo.notifications("org-1", incident.id)[0]
         self.assertEqual(attempt.status, "queued")
-        self.assertNotIn(settings.smtp_password, str(attempt.payload))
+        self.assertNotIn("re_", str(attempt.payload))
         self.assertNotIn("token-abc-123", str(attempt.payload))
 
     def test_create_from_detection_is_idempotent_by_org_and_event_id(self) -> None:

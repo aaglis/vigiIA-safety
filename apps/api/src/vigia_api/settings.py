@@ -18,7 +18,7 @@ def _is_placeholder(value: str | None) -> bool:
     if not value:
         return True
     normalized = value.strip().lower()
-    placeholder_markers = {"dev-only", "example", "placeholder", "todo", "smtp.dev.local"}
+    placeholder_markers = {"dev-only", "example", "placeholder", "todo"}
     return any(marker in normalized for marker in placeholder_markers)
 
 
@@ -75,15 +75,19 @@ class Settings(BaseSettings):
     evidence_presigned_url_ttl_seconds: int = 300
     s3_region: str = "us-east-1"
     s3_endpoint_url: str | None = None
+    # Endpoint alcançável pelo NAVEGADOR. As URLs assinadas de download precisam ser
+    # assinadas com o host que o browser acessa (ex.: localhost:9000), e não com o
+    # host interno da rede docker (minio:9000). Sem isso, cai no s3_endpoint_url.
+    s3_public_endpoint_url: str | None = None
     allow_internal_s3_endpoint: bool = False
     minio_access_key: str = "dev-only"
     minio_secret_key: str = "dev-only"
-    smtp_host: str = "smtp.dev.local"
-    smtp_user: str = "dev-only"
-    smtp_password: str = "dev-only"
-    smtp_from: str = "alerts@vigia.local"
+    resend_api_key: str = ""
+    notification_from: str = "alerts@vigia.local"
+    live_stream_public_base_url: str = "http://localhost:8889"
+    live_stream_ticket_ttl_seconds: int = 60
     incident_notification_enabled: bool = True
-    incident_notification_mode: str = "mock"  # mock|smtp
+    incident_notification_mode: str = "mock"  # mock|resend
     incident_notification_recipients: list[str] = ["ops@vigia.local"]
     incident_notification_severity_threshold: str = "high"
     edge_worker_api_key: str = "dev-only"
@@ -136,9 +140,9 @@ class Settings(BaseSettings):
                 "s3_endpoint_url": self.s3_endpoint_url or "",
                 "evidence_bucket_name": self.evidence_bucket_name,
             }
-            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "smtp":
-                secret_fields.update({"smtp_user": self.smtp_user, "smtp_password": self.smtp_password})
-                config_fields["smtp_host"] = self.smtp_host
+            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "resend":
+                secret_fields["resend_api_key"] = self.resend_api_key
+                config_fields["notification_from"] = self.notification_from
             for field_name, value in secret_fields.items():
                 if _is_weak_secret(value):
                     raise ValueError(f"{field_name} must be configured with a strong non-default value in {environment}")
@@ -151,9 +155,9 @@ class Settings(BaseSettings):
                 raise ValueError(f"s3_endpoint_url must be a real https endpoint in {environment}")
             if _is_placeholder(self.evidence_bucket_name):
                 raise ValueError(f"evidence_bucket_name must be configured for {environment}")
-            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "smtp":
+            if self.incident_notification_enabled and self.incident_notification_mode.lower() == "resend":
                 demo_fields = {
-                    "smtp_from": self.smtp_from,
+                    "notification_from": self.notification_from,
                     "incident_notification_recipients": ",".join(self.incident_notification_recipients),
                 }
                 for field_name, value in demo_fields.items():

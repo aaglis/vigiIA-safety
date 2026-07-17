@@ -8,6 +8,11 @@ from ..domain.auth import AuthTokens, AuthenticatedUser, MembershipSummary, Orga
 from ..settings import Settings, settings
 from ..observability import log_event
 from .security import decode_jwt, encode_jwt, generate_token, hash_password, hash_token, verify_password
+from ..security.permissions import role_permissions
+
+
+def _permissions_for_role(role: str):
+    return [Permission(p) for p in role_permissions(role) if p in Permission._value2member_map_]
 
 
 class InMemoryAuthRepository:
@@ -32,6 +37,18 @@ class InMemoryAuthRepository:
     def get_user_by_email(self, email: str) -> User | None:
         user_id = self.users_by_email.get(email.lower())
         return self.users.get(user_id) if user_id else None
+
+    def add_membership(self, organization_id: str, user_id: str, role: str, permissions: list | None = None) -> MembershipSummary:
+        """Mesma interface do repositório SQL: idempotente por (org, user)."""
+        org = OrganizationSummary(id=organization_id, name=organization_id, slug=organization_id)
+        membership = MembershipSummary(organization=org, role=role, permissions=permissions or [Permission.VIEW_DASHBOARD], active=True)
+        current = self.memberships.setdefault(user_id, [])
+        for index, existing in enumerate(current):
+            if existing.organization.id == organization_id:
+                current[index] = membership
+                return membership
+        current.append(membership)
+        return membership
 
     def update_password_hash(self, user_id: str, password_hash: str) -> None:
         self.users[user_id].password_hash = password_hash
@@ -58,6 +75,31 @@ class InMemoryAuthRepository:
 
     def list_memberships(self, user_id: str) -> list[MembershipSummary]:
         return cast(list[MembershipSummary], self.memberships.get(user_id, []))
+
+    def list_organization_memberships(self, organization_id: str) -> list[tuple[User, MembershipSummary]]:
+        items: list[tuple[User, MembershipSummary]] = []
+        for user_id, memberships in self.memberships.items():
+            user = self.users.get(user_id)
+            if user is None:
+                continue
+            for membership in memberships:
+                if membership.organization.id == organization_id:
+                    items.append((user, membership))
+        return items
+
+    def update_organization_membership(self, organization_id: str, user_id: str, *, role: str | None = None, active: bool | None = None) -> tuple[User, MembershipSummary]:
+        memberships = self.memberships.get(user_id, [])
+        for idx, membership in enumerate(memberships):
+            if membership.organization.id != organization_id:
+                continue
+            updated = MembershipSummary(organization=membership.organization, role=role or membership.role, permissions=_permissions_for_role(role or membership.role), active=membership.active if active is None else active)
+            memberships[idx] = updated
+            self.memberships[user_id] = memberships
+            return self.users[user_id], updated
+        raise KeyError("membership not found")
+
+    def deactivate_organization_membership(self, organization_id: str, user_id: str) -> None:
+        self.update_organization_membership(organization_id, user_id, active=False)
 
 
 class SqlAuthRepositoryFallback(InMemoryAuthRepository):
@@ -122,6 +164,25 @@ class AuthService:
             "permissions": [p.value for p in membership.permissions],
             "active": membership.active,
         }
+
+    def _serialize_member(self, user: User, membership: MembershipSummary) -> dict[str, Any]:
+        return {"user": {"id": user.id, "email": user.email, "full_name": user.full_name}, "organization": {"id": membership.organization.id, "name": membership.organization.name, "slug": membership.organization.slug}, "role": membership.role, "permissions": [p.value for p in membership.permissions], "active": membership.active}
+
+    def list_organization_memberships(self, organization_id: str) -> list[dict[str, Any]]:
+        getter = getattr(self.repository, "list_organization_memberships", None)
+        raw_pairs = getter(organization_id) if callable(getter) else []
+        pairs = cast(list[tuple[User, MembershipSummary]], raw_pairs)
+        return [self._serialize_member(user, membership) for user, membership in pairs]
+
+    def update_organization_membership(self, organization_id: str, user_id: str, role: str | None = None, active: bool | None = None) -> dict[str, Any]:
+        updater = getattr(self.repository, "update_organization_membership", None)
+        if not callable(updater):
+            raise ValueError("membership updates unavailable")
+        user, membership = cast(tuple[User, MembershipSummary], updater(organization_id, user_id, role=role, active=active))
+        return self._serialize_member(user, membership)
+
+    def deactivate_organization_membership(self, organization_id: str, user_id: str) -> dict[str, Any]:
+        return self.update_organization_membership(organization_id, user_id, active=False)
 
     def login(self, email: str, password: str, user_agent: str | None = None, ip_address: str | None = None) -> tuple[AuthTokens, UserSession, AuthenticatedUser]:
         user = self.repository.get_user_by_email(email)

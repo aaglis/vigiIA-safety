@@ -12,6 +12,10 @@ ROOT = Path('.')
 EXCLUDED_DIRS = {
     '.git', '.github', '.pytest_cache', '.mypy_cache', '.ruff_cache',
     '__pycache__', 'node_modules', 'dist', 'build', '.venv', 'venv',
+    # Artefatos gerados por testes (bundles minificados dão falso positivo).
+    'playwright-report', 'test-results',
+    # Config local de ferramenta do dev, fora do versionamento.
+    '.claude', '.agents',
 }
 EXCLUDED_FILES = {
     '.env.example',
@@ -29,7 +33,7 @@ TEXT_EXTENSIONS = {
     '.txt', '.yaml', '.yml', '.js', '.jsx', '.css', '.html', '.dockerfile',
 }
 SENSITIVE_NAMES = re.compile(
-    r'(?i)\b(jwt_secret|refresh_token_secret|secret_key|password|api_key|access_key|token|private_key|smtp_password|minio_secret_key|edge_worker_api_key)\b'
+    r'(?i)\b(jwt_secret|refresh_token_secret|secret_key|password|api_key|access_key|token|private_key|resend_api_key|minio_secret_key|edge_worker_api_key)\b'
 )
 ASSIGNMENT = re.compile(r'''(?ix)
     (?P<name>[A-Z0-9_]*(?:SECRET|PASSWORD|API_KEY|ACCESS_KEY|TOKEN|PRIVATE_KEY)[A-Z0-9_]*)
@@ -59,7 +63,15 @@ def is_excluded(path: Path) -> bool:
     return any(part in EXCLUDED_DIRS for part in path.parts)
 
 
+EMPTY_STRING_LITERAL = re.compile(r"""^\s*(''|"")""")
+
+
 def is_placeholder(value: str) -> bool:
+    # String vazia literal (api_key: '') é o oposto de um segredo — normalmente é o código
+    # que LIMPA a chave. O regex de valor captura o resto da linha (`'' })`), então o
+    # teste de "vazio" abaixo não bastaria.
+    if EMPTY_STRING_LITERAL.match(value):
+        return True
     normalized = value.strip().strip('"\'').lower()
     if not normalized or normalized in {'true', 'false', 'none', 'null'}:
         return True

@@ -8,6 +8,7 @@ from vigia_api.domain.evidence import EvidenceKind, EvidenceSource
 from vigia_api.domain.incidents import parse_detection_event
 from vigia_api.domain.operations import ZoneType
 from vigia_api.services.security import hash_password, hash_token
+from vigia_api.security.rate_limit import rate_limiter
 from vigia_api.settings import settings
 
 try:
@@ -25,9 +26,14 @@ class TenantIsolationHttpTest(unittest.TestCase):
     def setUp(self) -> None:
         if TestClient is None or create_app is None:
             self.skipTest("fastapi test client unavailable")
-        settings.login_rate_limit_attempts = 1000
-        settings.auth_rate_limit_attempts = 1000
-        settings.sensitive_rate_limit_attempts = 1000
+        # `settings` é singleton de módulo: sem restaurar, o resto da suíte herda limite
+        # 1000 e passa a rodar sem rate limit — um teste de "bloqueia após N tentativas"
+        # ficaria verde com o limitador desligado.
+        afrouxados = {"login_rate_limit_attempts": 1000, "auth_rate_limit_attempts": 1000, "sensitive_rate_limit_attempts": 1000}
+        for nome, valor in afrouxados.items():
+            self.addCleanup(setattr, settings, nome, getattr(settings, nome))
+            setattr(settings, nome, valor)
+        rate_limiter._windows.clear()
         self.container = build_container(repository_backend="memory", seed_dev=False)
         self.container.auth_service.repository.seed_demo_user()
         user = self.container.auth_service.repository.get_user_by_email("admin@vigia.local")
@@ -133,6 +139,49 @@ class TenantIsolationHttpTest(unittest.TestCase):
         self.assertEqual(zones[0]["camera_id"], "camera-demo-01")
         for path in ("sites", "cameras", "zones", "safety-rules", "required-ppe"):
             self.assertEqual(self.client.get(f"/api/v1/organizations/org-other/operations/{path}", headers=headers).status_code, 403)
+
+    def test_operations_mutations_require_permission_and_csrf(self) -> None:
+        bad_csrf_headers = {**ORIGIN_HEADERS, settings.csrf_header_name: "bad"}
+        good_headers = {**ORIGIN_HEADERS, settings.csrf_header_name: self.csrf}
+
+        user = self.container.auth_service.repository.get_user_by_email("admin@vigia.local")
+        assert user is not None
+        original_memberships = list(self.container.auth_service.repository.memberships[user.id])
+        self.container.auth_service.repository.memberships[user.id] = [
+            MembershipSummary(organization=original_memberships[0].organization, role="auditor_viewer", permissions=original_memberships[0].permissions, active=True)
+        ]
+        self.assertEqual(self.client.post("/api/v1/organizations/org-demo/operations/sites", json={"name": "Nope"}, headers=good_headers).status_code, 403)
+        self.container.auth_service.repository.memberships[user.id] = original_memberships
+
+        self.assertEqual(self.client.post("/api/v1/organizations/org-demo/operations/sites", json={"name": "New Site"}, headers=ORIGIN_HEADERS).status_code, 403)
+        self.assertEqual(self.client.post("/api/v1/organizations/org-demo/operations/sites", json={"name": "New Site"}, headers=bad_csrf_headers).status_code, 403)
+
+        site = self.client.post("/api/v1/organizations/org-demo/operations/sites", json={"name": "New Site", "address": "A1", "status": "active"}, headers=good_headers)
+        self.assertEqual(site.status_code, 200)
+        site_id = site.json()["site"]["id"]
+        updated = self.client.patch(f"/api/v1/organizations/org-demo/operations/sites/{site_id}", json={"name": "Updated Site", "address": "B2", "status": "inactive"}, headers=good_headers)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["site"]["name"], "Updated Site")
+
+        camera = self.client.post("/api/v1/organizations/org-demo/operations/cameras", json={"site_id": site_id, "name": "Cam 2", "stream_identifier": "rtsp://example", "status": "active", "metadata": {"source": "demo"}}, headers=good_headers)
+        self.assertEqual(camera.status_code, 200)
+        camera_id = camera.json()["camera"]["id"]
+        zone = self.client.post("/api/v1/organizations/org-demo/operations/zones", json={"site_id": site_id, "camera_id": camera_id, "zone_type": "access", "polygon_json": {"points": []}, "status": "active"}, headers=good_headers)
+        self.assertEqual(zone.status_code, 200)
+        zone_id = zone.json()["zone"]["id"]
+        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/cameras/{camera_id}", json={"site_id": site_id, "name": "Cam 2B", "stream_identifier": "rtsp://example-2", "status": "inactive", "metadata": {"source": "demo"}}, headers=good_headers).status_code, 200)
+        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/zones/{zone_id}", json={"site_id": site_id, "camera_id": camera_id, "zone_type": "restricted", "polygon_json": {"points": [[0, 0]]}, "status": "inactive"}, headers=good_headers).status_code, 200)
+
+    def test_operations_mutations_reject_cross_tenant_and_nested_mismatch(self) -> None:
+        headers = {**ORIGIN_HEADERS, settings.csrf_header_name: self.csrf}
+        site = self.client.post("/api/v1/organizations/org-demo/operations/sites", json={"name": "Scoped Site"}, headers=headers)
+        self.assertEqual(site.status_code, 200)
+        site_id = site.json()["site"]["id"]
+        other_site = self.container.operations_repository.create_site("org-other", "Other Site", site_id="site-other")
+        other_camera = self.container.operations_repository.create_camera("org-other", other_site.id, "Other Cam", "rtsp://other", camera_id="camera-other")
+        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/cameras/{other_camera.id}", json={"site_id": site_id, "name": "Bad", "stream_identifier": "rtsp://bad", "status": "active", "metadata": {}}, headers=headers).status_code, 403)
+        self.assertEqual(self.client.post("/api/v1/organizations/org-demo/operations/zones", json={"site_id": site_id, "camera_id": other_camera.id, "zone_type": "access", "polygon_json": {}, "status": "active"}, headers=headers).status_code, 403)
+        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/sites/{site_id}", json={"name": "Scoped Site", "address": None, "status": "active"}, headers={"Origin": "https://evil.example", settings.csrf_header_name: self.csrf}).status_code, 403)
 
 
 if __name__ == "__main__":

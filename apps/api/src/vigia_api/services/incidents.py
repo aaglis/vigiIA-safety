@@ -15,6 +15,7 @@ from ..domain.incidents import (
 )
 from ..observability import log_event
 from ..settings import settings
+from .notifications import is_resend_configured
 
 
 SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -80,14 +81,14 @@ class InMemoryIncidentRepository:
             mode = self.settings.incident_notification_mode.strip().lower()
             enabled = bool(self.settings.incident_notification_enabled)
             status = "queued"
-            channel = "mock" if mode != "smtp" else "email"
+            channel = "email" if mode == "resend" else "mock"
             payload = {"severity": incident.severity, "channel": channel, "mode": mode, "recipients": len(self.settings.incident_notification_recipients)}
             if not enabled:
                 status = "suppressed"
                 payload["reason"] = "disabled"
-            elif mode == "smtp" and (self.settings.smtp_host.startswith("smtp.dev.local") or self.settings.smtp_user in {"dev-only", ""} or self.settings.smtp_password in {"dev-only", ""}):
+            elif mode == "resend" and not is_resend_configured(self.settings):
                 status = "failed"
-                payload["reason"] = "smtp_misconfigured"
+                payload["reason"] = "resend_misconfigured"
             self._notifications.append(NotificationAttempt(id=new_id(), organization_id=incident.organization_id, incident_id=incident.id, channel=channel, status=status, created_at=datetime.now(timezone.utc), payload=payload))
             log_event("incident.notification_attempt", organization_id=incident.organization_id, incident_id=incident.id, channel=channel, status=status, severity=incident.severity, recipients=len(self.settings.incident_notification_recipients))
         log_event("incident.created", organization_id=incident.organization_id, incident_id=incident.id, edge_worker_id=str(incident.worker_id) if incident.worker_id else None, severity=incident.severity, camera_id=incident.camera_id)

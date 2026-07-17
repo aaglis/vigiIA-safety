@@ -1,18 +1,18 @@
-import type { Incident } from '../../api/incidents'
-import { SectionHeading, SeverityPill, StatusPill } from '../../components/ui/brand'
+import type { Incident, IncidentStatus } from '../../api/incidents'
+import { Icon } from '../../components/ui/icons'
 
-type HealthTone = 'good' | 'warning' | 'critical' | 'neutral'
-
-type HealthItem = {
-  label: string
-  tone: HealthTone
-  detail: string
+export type OverviewSite = {
+  id: string
+  name: string
+  cameraCount: number
+  activeCameraCount: number
+  status: string
 }
 
 function formatMinutes(value: number | null) {
   if (value == null || Number.isNaN(value)) return '—'
-  if (value < 1) return '< 1 min'
-  if (value < 60) return `${Math.round(value)} min`
+  if (value < 1) return '< 1min'
+  if (value < 60) return `${Math.round(value)}min`
   const hours = Math.floor(value / 60)
   const minutes = Math.round(value % 60)
   if (hours < 24) return `${hours}h ${minutes.toString().padStart(2, '0')}m`
@@ -20,221 +20,198 @@ function formatMinutes(value: number | null) {
   return `${days}d ${hours % 24}h`
 }
 
-function formatTimestamp(value: string | null) {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+function formatAgo(value: string) {
+  const diffMs = Date.now() - new Date(value).getTime()
+  if (Number.isNaN(diffMs)) return '—'
+  const min = Math.max(0, Math.round(diffMs / 60000))
+  if (min < 1) return 'agora'
+  if (min < 60) return `${min} min`
+  const hours = Math.floor(min / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+const severityDot: Record<string, string> = {
+  high: '#C1552B',
+  medium: '#C98A2B',
+  low: '#2F7D57',
+}
+
+function statusChip(status: IncidentStatus) {
+  const map: Record<IncidentStatus, { label: string; bg: string; color: string }> = {
+    open: { label: 'Aberto', bg: '#F6E4DC', color: '#B14A22' },
+    acknowledged: { label: 'Reconhecido', bg: '#F3E9D6', color: '#946416' },
+    resolved: { label: 'Resolvido', bg: '#E4EFE9', color: '#1F6B4A' },
+    dismissed: { label: 'Descartado', bg: '#ECE7DF', color: '#6B655C' },
+  }
+  return map[status]
+}
+
+function siteDotColor(status: string) {
+  if (status === 'active') return '#2F7D57'
+  if (status === 'inactive' || status === 'suspended') return '#C1552B'
+  return '#C98A2B'
 }
 
 export function OverviewPage({
-  activeOrganization,
-  userName,
   incidentSummary,
   criticalIncidents,
   avgAcknowledgementMinutes,
   activeCamerasCount,
-  operationSitesCount,
-  evidenceAvailableCount,
-  evidencePendingCount,
+  totalCamerasCount,
+  sitesCount,
+  sites,
   recentIncidents,
   selectedIncidentId,
-  liveLabel,
   dashboardLoading,
   dashboardError,
-  health,
-  onOpenIncidents,
-  onOpenEvidence,
-  onOpenOperations,
   onSelectIncident,
+  onOpenIncidents,
+  onRegisterIncident,
 }: {
-  activeOrganization: string
-  userName: string
   incidentSummary: { total: number; open: number; acknowledged: number; resolved: number }
   criticalIncidents: number
   avgAcknowledgementMinutes: number | null
   activeCamerasCount: number
-  operationSitesCount: number
-  evidenceAvailableCount: number
-  evidencePendingCount: number
+  totalCamerasCount: number
+  sitesCount: number
+  sites: OverviewSite[]
   recentIncidents: Incident[]
   selectedIncidentId: string | null
-  liveLabel: string
   dashboardLoading: boolean
   dashboardError: string | null
-  health: readonly HealthItem[]
-  onOpenIncidents: () => void
-  onOpenEvidence: () => void
-  onOpenOperations: () => void
   onSelectIncident: (id: string) => void
+  onOpenIncidents: () => void
+  onRegisterIncident: () => void
 }) {
-  const pendingQueue = recentIncidents.filter((incident) => incident.status === 'open' || incident.status === 'acknowledged')
+  const kpis = [
+    { label: 'Incidentes abertos', value: String(incidentSummary.open), note: criticalIncidents > 0 ? `${criticalIncidents} crítico${criticalIncidents > 1 ? 's' : ''}` : `${incidentSummary.total} no total`, noteColor: criticalIncidents > 0 ? '#B14A22' : '#8E887B', dot: '#C1552B' },
+    { label: 'Tempo até reconhecer', value: formatMinutes(avgAcknowledgementMinutes), note: avgAcknowledgementMinutes == null ? 'sem amostra' : 'média', noteColor: '#8E887B', dot: '#C98A2B' },
+    { label: 'Câmeras ativas', value: `${activeCamerasCount}`, suffix: totalCamerasCount > 0 ? `/${totalCamerasCount}` : undefined, note: `${sitesCount} unidade${sitesCount === 1 ? '' : 's'}`, noteColor: '#8E887B', dot: '#2F7D57' },
+    { label: 'Resolvidos', value: String(incidentSummary.resolved), note: `${incidentSummary.acknowledged} reconhecidos`, noteColor: '#2F7D57', dot: '#2F7D57' },
+  ]
 
   return (
-    <section className="space-y-6">
-      <div className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Dashboard</p>
-            <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">Visão geral da operação</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">Fila de ação, saúde do sistema e incidentes recentes em uma única superfície operacional.</p>
-          </div>
-          <div className="rounded-[24px] border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3 text-right">
-            <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">Organização</p>
-            <p className="mt-2 font-display text-lg text-[var(--ink)]">{activeOrganization}</p>
-            <p className="text-xs text-[var(--muted)]">{userName}</p>
-          </div>
+    <div className="mx-auto max-w-[1120px]">
+      {/* page header */}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="font-display text-[28px] font-bold leading-none tracking-[-0.025em] text-[var(--ink)]">Visão geral</h2>
+          <p className="mt-2 text-sm text-[var(--muted)]">Estado operacional em tempo real das unidades monitoradas.</p>
         </div>
-
-        {dashboardLoading ? <p className="mt-4 text-sm text-[var(--muted)]">Atualizando dados operacionais…</p> : null}
-        {dashboardError ? <div className="mt-4 rounded-[24px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.08)] px-4 py-3 text-sm text-[#9e4120]">{dashboardError}</div> : null}
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {[
-            { label: 'Incidentes abertos', value: incidentSummary.open, note: `${incidentSummary.total} no total` },
-            { label: 'Críticos', value: criticalIncidents, note: 'Alta severidade em triagem' },
-            { label: 'Tempo médio de reconhecimento', value: formatMinutes(avgAcknowledgementMinutes), note: avgAcknowledgementMinutes == null ? 'Sem amostra suficiente' : 'Média por incidente reconhecido' },
-            { label: 'Câmeras ativas', value: activeCamerasCount, note: `${operationSitesCount} sites` },
-            { label: 'Evidências', value: `${evidenceAvailableCount} disponíveis`, note: `${evidencePendingCount} pendentes` },
-          ].map((item) => (
-            <article key={item.label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.66)] p-4">
-              <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--muted)]">{item.label}</p>
-              <p className="mt-3 font-display text-3xl text-[var(--ink)]">{item.value}</p>
-              <p className="mt-2 text-xs uppercase tracking-[0.22em] text-[var(--muted)]">{item.note}</p>
-            </article>
-          ))}
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button type="button" onClick={onOpenIncidents} className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.22)] transition hover:-translate-y-0.5">Abrir incidentes</button>
-          <button type="button" onClick={onOpenEvidence} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">Ver evidências</button>
-          <button type="button" onClick={onOpenOperations} className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.64)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5">Operações e câmeras</button>
+        <div className="flex items-center gap-2.5">
+          <button type="button" onClick={onOpenIncidents} className="flex h-[38px] items-center gap-2 rounded-[9px] border border-[color:var(--line)] bg-[var(--card)] px-3.5 text-sm font-medium text-[var(--ink)] transition hover:bg-white">
+            <Icon name="bar-chart" size={16} className="text-[var(--muted-2)]" />
+            Hoje
+          </button>
+          <button type="button" onClick={onRegisterIncident} className="flex h-[38px] items-center gap-2 rounded-[9px] bg-[var(--accent)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]">
+            <Icon name="plus" size={16} />
+            Registrar incidente
+          </button>
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.07fr_0.93fr]">
-        <article className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
-          <SectionHeading eyebrow="Fila de ação" title="O que precisa da equipe agora" description="Incidentes abertos e reconhecidos com atalhos diretos para a tela de triagem." />
+      {dashboardLoading ? <p className="mb-4 text-sm text-[var(--muted)]">Atualizando dados operacionais…</p> : null}
+      {dashboardError ? <div className="mb-4 rounded-[11px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.07)] px-4 py-3 text-sm text-[#9e4120]">{dashboardError}</div> : null}
 
-          <div className="mt-5 space-y-3">
-            {pendingQueue.length === 0 ? (
-              <div className="rounded-[28px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.58)] p-6 text-sm text-[var(--muted)]">Nenhum item pendente no momento.</div>
-            ) : (
-              pendingQueue.map((incident) => (
-                <button key={incident.id} type="button" onClick={() => onSelectIncident(incident.id)} className={`w-full rounded-[28px] border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(32,27,24,0.08)] ${selectedIncidentId === incident.id ? 'border-[rgba(193,85,43,0.35)] bg-[rgba(193,85,43,0.06)]' : 'border-[color:var(--line)] bg-[rgba(255,255,255,0.55)]'}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-display text-xl text-[var(--ink)]">{incident.summary}</p>
-                        <StatusPill status={incident.status} />
-                      </div>
-                      <p className="mt-2 text-sm text-[var(--muted)]">{incident.site_id ?? 'Site não informado'} · {incident.camera_id} · Zona {incident.zone_id}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <SeverityPill severity={incident.severity} />
-                      <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.7)] px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">{incident.status === 'open' ? 'Reconhecer' : 'Resolver'}</span>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.7)] px-3 py-1 text-xs text-[var(--muted)]">Criado {formatTimestamp(incident.created_at)}</span>
-                    <span className="rounded-full border border-[color:var(--line)] bg-[rgba(255,255,255,0.7)] px-3 py-1 text-xs text-[var(--muted)]">Atualizado {formatTimestamp(incident.updated_at)}</span>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </article>
-
-        <article className="rounded-[34px] border border-[color:var(--line)] bg-[var(--card)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
-          <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Saúde da operação</p>
-          <h2 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)]">Sinais do sistema</h2>
-          <p className="mt-3 text-sm leading-7 text-[var(--muted)]">Os status abaixo são honestos: ficam em certo quando o dado existe e em atenção quando a plataforma ainda não confirma a condição.</p>
-
-          <div className="mt-6 space-y-3">
-            {health.map((item) => {
-              const toneClass = item.tone === 'good'
-                ? 'bg-[rgba(47,125,87,0.14)] text-[#236444] border-[rgba(47,125,87,0.22)]'
-                : item.tone === 'warning'
-                  ? 'bg-[rgba(201,138,43,0.16)] text-[#7a5314] border-[rgba(201,138,43,0.25)]'
-                  : item.tone === 'critical'
-                    ? 'bg-[rgba(193,85,43,0.16)] text-[#9e4120] border-[rgba(193,85,43,0.28)]'
-                    : 'bg-[rgba(32,27,24,0.08)] text-[var(--muted)] border-[color:var(--line)]'
-
-              return (
-                <div key={item.label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-display text-lg text-[var(--ink)]">{item.label}</p>
-                    <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] ${toneClass}`}>{item.tone === 'good' ? 'OK' : item.tone === 'warning' ? 'Atenção' : item.tone === 'critical' ? 'Crítico' : '—'}</span>
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{item.detail}</p>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="mt-6 rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.68)] p-4 text-sm text-[var(--muted)]">
-            Status geral: <span className="font-medium text-[var(--ink)]">{liveLabel}</span>
-          </div>
-        </article>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
-        <article className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
-          <SectionHeading eyebrow="Incidentes recentes" title="Últimos eventos" description="Tabela curta para revisão rápida e navegação direta para o detalhe." />
-
-          <div className="mt-5 overflow-hidden rounded-[28px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.65)]">
-            <div className="grid grid-cols-[1.3fr_0.7fr_0.7fr_0.9fr_0.7fr] gap-3 border-b border-[color:var(--line)] px-4 py-3 text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">
-              <span>Resumo</span>
-              <span>Status</span>
-              <span>Sev.</span>
-              <span>Atualizado</span>
-              <span>Ação</span>
+      {/* KPI row */}
+      <div className="mb-5 grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+        {kpis.map((kpi) => (
+          <div key={kpi.label} className="rounded-[11px] border border-[color:var(--border)] bg-[var(--card)] px-[17px] py-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs text-[var(--muted-2)]">{kpi.label}</span>
+              <span className="h-2 w-2 rounded-full" style={{ background: kpi.dot }} />
             </div>
-            {recentIncidents.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-[var(--muted)]">Nenhum incidente recente para exibir.</div>
-            ) : (
-              recentIncidents.map((incident) => (
-                <div key={incident.id} className={`grid grid-cols-[1.3fr_0.7fr_0.7fr_0.9fr_0.7fr] gap-3 border-b border-[color:var(--line)] px-4 py-4 last:border-b-0 ${selectedIncidentId === incident.id ? 'bg-[rgba(193,85,43,0.05)]' : ''}`}>
-                  <div>
-                    <p className="font-medium text-[var(--ink)]">{incident.summary}</p>
-                    <p className="mt-1 text-xs text-[var(--muted)]">{incident.site_id ?? 'Site não informado'} · {incident.camera_id}</p>
-                  </div>
-                  <div><StatusPill status={incident.status} /></div>
-                  <div><SeverityPill severity={incident.severity} /></div>
-                  <div className="text-sm text-[var(--muted)]">{formatTimestamp(incident.updated_at)}</div>
-                  <div>
-                    <button type="button" onClick={() => onSelectIncident(incident.id)} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-3 py-2 text-xs font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">Detalhes</button>
-                  </div>
-                </div>
-              ))
-            )}
+            <div className="flex items-baseline gap-2">
+              <span className="font-display text-[30px] font-bold leading-none text-[var(--ink)]">
+                {kpi.value}
+                {kpi.suffix ? <span className="text-[18px] text-[var(--nav-label)]">{kpi.suffix}</span> : null}
+              </span>
+              <span className="font-mono-ui text-[11px]" style={{ color: kpi.noteColor }}>{kpi.note}</span>
+            </div>
           </div>
-        </article>
-
-        <article className="rounded-[34px] border border-[color:var(--line)] bg-[rgba(245,243,239,0.92)] p-6 shadow-[0_22px_60px_rgba(32,27,24,0.08)]">
-          <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">Resumo operacional</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {[
-              ['Total de incidentes', incidentSummary.total],
-              ['Reconhecidos', incidentSummary.acknowledged],
-              ['Resolvidos', incidentSummary.resolved],
-              ['Fila atual', pendingQueue.length],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.62)] p-4">
-                <p className="font-mono-ui text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">{label}</p>
-                <p className="mt-2 font-display text-2xl text-[var(--ink)]">{String(value)}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-6 rounded-[24px] border border-[color:var(--line)] bg-[rgba(255,255,255,0.68)] p-4 text-sm leading-7 text-[var(--muted)]">
-            Os KPIs refletem a base carregada no shell atual. Quando houver mais fontes de telemetria, estes blocos podem virar live charts sem mudar a navegação.
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={onOpenIncidents} className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-medium text-[var(--paper)] shadow-[0_16px_40px_rgba(193,85,43,0.22)] transition hover:-translate-y-0.5">Ir para incidentes</button>
-            <button type="button" onClick={onOpenOperations} className="rounded-full border border-[color:var(--line)] bg-[var(--paper)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:-translate-y-0.5 hover:bg-white">Ir para operações</button>
-          </div>
-        </article>
+        ))}
       </div>
-    </section>
+
+      {/* content grid: table + side */}
+      <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {/* incidents table */}
+        <div className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--card)]">
+          <div className="flex items-center justify-between border-b border-[color:var(--divider)] px-[18px] py-[15px]">
+            <h3 className="font-display text-[15px] font-bold text-[var(--ink)]">Incidentes recentes</h3>
+            <button type="button" onClick={onOpenIncidents} className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)] transition hover:text-[var(--accent)]">
+              Ver todos
+              <Icon name="chevron-right" size={13} className="text-[var(--nav-label)]" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-[1.6fr_1fr_0.8fr_0.6fr] gap-3 border-b border-[color:var(--divider)] px-[18px] py-2.5 font-mono-ui text-[10px] tracking-[0.1em] text-[var(--nav-label)]">
+            <span>EVENTO</span>
+            <span>LOCAL</span>
+            <span>STATUS</span>
+            <span className="text-right">HÁ</span>
+          </div>
+
+          {recentIncidents.length === 0 ? (
+            <div className="px-[18px] py-8 text-sm text-[var(--muted)]">
+              {dashboardLoading ? 'Carregando incidentes…' : 'Nenhum incidente recente. Quando o worker enviar eventos, eles aparecem aqui.'}
+            </div>
+          ) : (
+            recentIncidents.map((incident) => {
+              const chip = statusChip(incident.status)
+              const selected = selectedIncidentId === incident.id
+              return (
+                <button
+                  key={incident.id}
+                  type="button"
+                  onClick={() => onSelectIncident(incident.id)}
+                  className={`grid w-full grid-cols-[1.6fr_1fr_0.8fr_0.6fr] items-center gap-3 border-b border-[color:var(--row)] px-[18px] py-[13px] text-left transition last:border-b-0 hover:bg-[rgba(193,85,43,0.04)] ${selected ? 'bg-[rgba(193,85,43,0.05)]' : ''}`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: severityDot[incident.severity.toLowerCase()] ?? '#8E887B' }} />
+                    <span className="truncate text-[13px] font-medium text-[var(--ink)]">{incident.summary}</span>
+                  </span>
+                  <span className="truncate text-[13px] text-[var(--muted)]">{incident.site_id ?? 'Site —'} · {incident.camera_id}</span>
+                  <span>
+                    <span className="inline-flex rounded-md px-2.5 py-1 text-[11px] font-medium" style={{ background: chip.bg, color: chip.color }}>{chip.label}</span>
+                  </span>
+                  <span className="text-right font-mono-ui text-xs text-[var(--label)]">{formatAgo(incident.created_at)}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        {/* side column */}
+        <div className="flex flex-col gap-3.5">
+          <div className="rounded-xl border border-[color:var(--border)] bg-[var(--card)] px-[17px] py-4">
+            <h3 className="mb-3.5 font-display text-[15px] font-bold text-[var(--ink)]">Unidades</h3>
+            <div className="flex flex-col gap-3">
+              {sites.length === 0 ? (
+                <p className="text-[13px] text-[var(--muted)]">Nenhuma unidade configurada.</p>
+              ) : (
+                sites.map((site) => (
+                  <div key={site.id} className="flex items-center gap-2.5">
+                    <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: siteDotColor(site.status) }} />
+                    <span className="flex-1 truncate text-[13px] text-[var(--ink)]">{site.name}</span>
+                    <span className="font-mono-ui text-[11px] text-[var(--label)]">{site.activeCameraCount < site.cameraCount ? `${site.activeCameraCount}/${site.cameraCount}` : site.cameraCount} câm</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[var(--ink)] p-[17px]">
+            <p className="mb-2.5 font-mono-ui text-[10px] tracking-[0.16em] text-[#8a8178]">RESUMO DO TURNO</p>
+            <p className="mb-1.5 font-display text-[26px] font-bold leading-[1.1] text-[var(--paper)]">{incidentSummary.total} incidente{incidentSummary.total === 1 ? '' : 's'}</p>
+            <p className="mb-3.5 text-[13px] leading-[1.5] text-[#b7afa5]">{incidentSummary.open} aberto{incidentSummary.open === 1 ? '' : 's'} · {incidentSummary.acknowledged} reconhecido{incidentSummary.acknowledged === 1 ? '' : 's'} · {incidentSummary.resolved} resolvido{incidentSummary.resolved === 1 ? '' : 's'}.</p>
+            <button type="button" onClick={onOpenIncidents} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--accent-hover)] transition hover:opacity-80">
+              Ver incidentes
+              <Icon name="arrow-right" size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -14,7 +14,9 @@ from .api.v1.evidence import router as evidence_router
 from .api.v1.health import router as health_router
 from .api.v1.incidents import router as incidents_router
 from .api.v1.invites import router as invites_router
+from .api.v1.members import router as members_router
 from .api.v1.operations import router as operations_router
+from .api.v1.streams import router as streams_router
 from .api.v1.platform import router as platform_router
 from .container import AppContainer, build_container
 from .observability import observe_request, set_request_id, snapshot_metrics
@@ -37,9 +39,11 @@ def create_app(config: Settings | None = None, container: AppContainer | None = 
     app.include_router(auth_router, prefix=config.api_v1_prefix)
     app.include_router(account_router, prefix=config.api_v1_prefix)
     app.include_router(invites_router, prefix=config.api_v1_prefix)
+    app.include_router(members_router, prefix=config.api_v1_prefix)
     app.include_router(edge_workers_router, prefix=config.api_v1_prefix)
     app.include_router(evidence_router, prefix=config.api_v1_prefix)
     app.include_router(operations_router, prefix=config.api_v1_prefix)
+    app.include_router(streams_router, prefix=config.api_v1_prefix)
     app.include_router(platform_router, prefix=config.api_v1_prefix)
     app.include_router(incidents_router, prefix=config.api_v1_prefix)
 

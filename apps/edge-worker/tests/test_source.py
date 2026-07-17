@@ -32,21 +32,33 @@ class SourceTest(unittest.TestCase):
             self.assertEqual(frame.image_bytes, b"helmet frame bytes")
             self.assertEqual(frame.metadata["source_type"], "image")
 
-    def test_video_source_directory_yields_multiple_frames_and_limit(self) -> None:
+    def test_image_source_directory_yields_multiple_frames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             (d / "0001.jpg").write_bytes(b"frame-1")
             (d / "0002.jpg").write_bytes(b"frame-2")
-            cfg = WorkerConfig(edge_worker_id="worker-1", organization_id="org-1", site_id="site-1", camera_id="cam-1", zone_id="zone-1", edge_source_type="video", edge_source_uri=str(d), edge_max_frames=1)
-            source = build_frame_source(cfg)
-            frames = list(source.frames())
+            cfg = WorkerConfig(edge_worker_id="worker-1", organization_id="org-1", site_id="site-1", camera_id="cam-1", zone_id="zone-1", edge_source_type="image", edge_source_uri=str(d))
+            frames = list(build_frame_source(cfg).frames())
             self.assertEqual(len(frames), 2)
-            self.assertEqual(frames[0].metadata["source_type"], "video")
+            self.assertEqual(frames[0].metadata["source_type"], "image")
 
-    def test_rtsp_source_is_explicitly_experimental(self) -> None:
+    def test_rtsp_builds_cv2_source(self) -> None:
+        from vigia_edge_worker.source import Cv2VideoSource
         cfg = WorkerConfig(edge_worker_id="worker-1", organization_id="org-1", site_id="site-1", camera_id="cam-1", zone_id="zone-1", edge_source_type="rtsp", edge_source_uri="rtsp://camera")
-        with self.assertRaisesRegex(FrameSourceError, "experimental"):
-            build_frame_source(cfg)
+        self.assertIsInstance(build_frame_source(cfg), Cv2VideoSource)
+
+    def test_missing_video_file_fails_clear(self) -> None:
+        cfg = WorkerConfig(edge_worker_id="worker-1", organization_id="org-1", site_id="site-1", camera_id="cam-1", zone_id="zone-1", edge_source_type="video", edge_source_uri="/no/such/video.mp4")
+        with self.assertRaises(FrameSourceError):
+            list(build_frame_source(cfg).frames())
+
+    def test_config_stream_override_drives_source(self) -> None:
+        from vigia_edge_worker.source import Cv2VideoSource, classify_source_type
+        self.assertEqual(classify_source_type("rtsp://cam/live"), "rtsp")
+        self.assertEqual(classify_source_type("/videos/x.mp4"), "video")
+        source = build_frame_source(self.config, stream_override="/videos/demo.mp4")
+        self.assertIsInstance(source, Cv2VideoSource)
+        self.assertEqual(source.source_uri, "/videos/demo.mp4")
 
 
 if __name__ == "__main__":

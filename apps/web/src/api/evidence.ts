@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import type { Metadata } from './types'
 
 export type EvidenceKind = 'snapshot' | 'clip' | 'metadata' | (string & {})
 
@@ -14,7 +15,7 @@ export interface EvidenceItem {
   kind: EvidenceKind
   created_at: string
   deleted_at: string | null
-  metadata: Record<string, unknown>
+  metadata: Metadata
 }
 
 export interface EvidenceListResponse {

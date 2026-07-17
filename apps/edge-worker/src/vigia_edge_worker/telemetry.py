@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from statistics import mean
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+
+
+LATENCY_WINDOW = 500
 
 
 def sanitize_error(value: object) -> str:
@@ -37,10 +41,16 @@ class TelemetryState:
     api_errors: int = 0
     source_errors: int = 0
     pending_queue: int = 0
-    inference_latencies_ms: list[float] = field(default_factory=list)
-    send_latencies_ms: list[float] = field(default_factory=list)
+    # Janela móvel: câmera ao vivo processa frames para sempre, então guardar toda
+    # latência vazaria memória e faria a média valer "desde o boot" em vez de "agora".
+    inference_latencies_ms: deque[float] = field(default_factory=lambda: deque(maxlen=LATENCY_WINDOW))
+    send_latencies_ms: deque[float] = field(default_factory=lambda: deque(maxlen=LATENCY_WINDOW))
     last_error: str | None = None
     last_result: str | None = None
+    # Regras que o modelo carregado NÃO consegue avaliar (ex.: EPI sem classe de capacete).
+    # Vai no heartbeat: o operador precisa saber que a regra está inativa, e não confundir
+    # "nenhum incidente" com "tudo certo".
+    inactive_rules: list[str] = field(default_factory=list)
 
     def record_inference_latency(self, value_ms: float) -> None:
         self.inference_latencies_ms.append(value_ms)
@@ -68,6 +78,7 @@ class TelemetryState:
             "pending_queue": self.pending_queue,
             "avg_inference_latency_ms": round(mean(self.inference_latencies_ms), 4) if self.inference_latencies_ms else 0.0,
             "avg_send_latency_ms": round(mean(self.send_latencies_ms), 4) if self.send_latencies_ms else 0.0,
+            "inactive_rules": list(self.inactive_rules),
             "last_error": self.last_error,
             "last_result": self.last_result,
         }

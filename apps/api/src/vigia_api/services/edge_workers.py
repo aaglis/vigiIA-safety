@@ -41,10 +41,12 @@ class InMemoryEdgeWorkerRepository:
         if worker is not None:
             self.workers_by_client_id.pop(worker.client_id, None)
 
-    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at: datetime) -> None:
+    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at: datetime, telemetry: dict | None = None) -> None:
         worker = self.workers[worker_id]
         worker.last_heartbeat_at = last_heartbeat_at
         worker.updated_at = last_heartbeat_at
+        if telemetry is not None:
+            worker.last_telemetry = telemetry
 
     def update_status(self, worker_id: str, status: EdgeWorkerStatus) -> None:
         worker = self.workers[worker_id]
@@ -57,7 +59,7 @@ class EdgeWorkerRepositoryProtocol(Protocol):
     def get(self, worker_id: str) -> EdgeWorker | None: ...
     def get_by_client_id(self, client_id: str) -> EdgeWorker | None: ...
     def list_all(self) -> list[EdgeWorker]: ...
-    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at: datetime) -> None: ...
+    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at: datetime, telemetry: dict | None = None) -> None: ...
     def update_status(self, worker_id: str, status: EdgeWorkerStatus) -> None: ...
 
 
@@ -79,6 +81,7 @@ class EdgeWorkerService:
             "allowed_camera_ids": list(worker.allowed_camera_ids),
             "status": worker.status.value,
             "last_heartbeat_at": worker.last_heartbeat_at.isoformat() if worker.last_heartbeat_at else None,
+            "last_telemetry": worker.last_telemetry,
             "created_at": worker.created_at.isoformat(),
             "updated_at": worker.updated_at.isoformat(),
         }
@@ -117,9 +120,15 @@ class EdgeWorkerService:
         zones = []
         safety_rules = []
         required_ppe = []
+        cameras = []
         if ops is not None:
+            cameras = [
+                {"id": c.id, "site_id": c.site_id, "name": c.name, "stream_identifier": c.stream_identifier, "status": c.status.value, "metadata": c.metadata}
+                for c in ops.list_cameras(worker.organization_id)
+                if c.id in worker.allowed_camera_ids
+            ]
             zones = [
-                {"id": z.id, "site_id": z.site_id, "camera_id": z.camera_id, "zone_type": z.zone_type.value, "status": z.status.value, "polygon_json": z.polygon_json}
+                {"id": z.id, "site_id": z.site_id, "camera_id": z.camera_id, "zone_type": z.zone_type.value, "name": z.name, "status": z.status.value, "polygon_json": z.polygon_json}
                 for z in ops.list_zones(worker.organization_id)
                 if z.site_id == worker.site_id
             ]
@@ -142,18 +151,29 @@ class EdgeWorkerService:
             "worker": self._serialize_worker(worker),
             "capabilities": ["heartbeat", "publish_detection", "request_evidence_upload"],
             "allowed_camera_ids": worker.allowed_camera_ids,
+            "cameras": cameras,
             "site_id": worker.site_id,
             "zones": zones,
             "safety_rules": safety_rules,
             "required_ppe": required_ppe,
         }
 
-    def heartbeat(self, client_id: str, api_key: str) -> EdgeWorker:
+    def list_workers(self, organization_id: str) -> list[EdgeWorker]:
+        """Inventário de workers da organização — a aba Workers dependia de a UI lembrar
+        o que foi registrado na sessão, então worker provisionado antes nunca aparecia."""
+        return self.repository.list_by_organization(organization_id)
+
+    def heartbeat(self, client_id: str, api_key: str, telemetry: dict | None = None) -> EdgeWorker:
+        """`telemetry` é o `status` do heartbeat (latência, fila, `inactive_rules`).
+        Antes era descartado: o worker mandava e nada guardava, então a única forma de
+        saber o estado do edge era entrar no container."""
         worker = self._authenticate(client_id, api_key)
         now = datetime.now(timezone.utc)
         worker.last_heartbeat_at = now
         worker.updated_at = now
-        self.repository.update_last_heartbeat(worker.id, now)
+        if telemetry is not None:
+            worker.last_telemetry = telemetry
+        self.repository.update_last_heartbeat(worker.id, now, telemetry)
         increment_metric("edge_heartbeat", (worker.organization_id, "ok"))
         log_event("edge_worker.heartbeat", organization_id=worker.organization_id, edge_worker_id=worker.id, client_id=worker.client_id)
         return worker

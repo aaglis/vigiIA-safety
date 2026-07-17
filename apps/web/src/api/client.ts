@@ -1,3 +1,5 @@
+import type { JsonValue } from './types'
+
 export const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
 
 export class ApiError extends Error {
@@ -10,7 +12,6 @@ export class ApiError extends Error {
   }
 }
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 const csrfCookieName = 'csrf_token'
 const csrfHeaderName = 'x-csrf-token'
 

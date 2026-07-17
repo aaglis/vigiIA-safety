@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from uuid import uuid4
 
 try:
     from sqlalchemy import select
@@ -111,6 +112,26 @@ class SqlAlchemyAuthRepository:
             return None
         return UserSession(id=row.id, user_id=row.user_id, refresh_token_hash=row.refresh_token_hash, expires_at=self._ensure_aware_utc(row.expires_at, default_now=True) or datetime.now(timezone.utc), revoked_at=self._ensure_aware_utc(row.revoked_at), created_at=self._ensure_aware_utc(row.created_at, default_now=True) or datetime.now(timezone.utc), last_used_at=self._ensure_aware_utc(row.last_used_at, default_now=True) or datetime.now(timezone.utc), user_agent=row.user_agent, ip_address=row.ip_address, active_organization_id=row.active_organization_id)
 
+    def add_membership(self, organization_id: str, user_id: str, role: str, permissions: list | None = None) -> MembershipSummary:
+        """Vincula usuário à organização. Idempotente: se já existe, atualiza o papel e reativa."""
+        now = datetime.now(timezone.utc)
+        with self.session_factory() as session:
+            existing = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == organization_id, OrganizationMembershipRow.user_id == user_id)).scalars().first() if select is not None else None
+            if existing is None:
+                session.add(OrganizationMembershipRow(id=uuid4().hex, organization_id=organization_id, user_id=user_id, role=role, status="active", invited_by=None, joined_at=now, created_at=now, updated_at=now))
+            else:
+                existing.role = role
+                existing.status = "active"
+                existing.updated_at = now
+            session.commit()
+        org_row = self._load_organization(organization_id)
+        org = OrganizationSummary(id=organization_id, name=org_row.name if org_row else organization_id, slug=organization_id)
+        return MembershipSummary(organization=org, role=role, permissions=permissions or [Permission(p) for p in role_permissions(role) if p in Permission._value2member_map_], active=True)
+
+    def _load_organization(self, organization_id: str):
+        with self.session_factory() as session:
+            return session.get(OrganizationRow, organization_id)
+
     def list_memberships(self, user_id: str) -> list[MembershipSummary]:
         if select is None:
             return []
@@ -120,3 +141,37 @@ class SqlAlchemyAuthRepository:
             for membership_row, org_row in session.execute(stmt).all():
                 items.append(MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active"))
             return items
+
+    def list_organization_memberships(self, organization_id: str) -> list[tuple[User, MembershipSummary]]:
+        if select is None:
+            return []
+        with self.session_factory() as session:
+            stmt = select(UserRow, OrganizationMembershipRow, OrganizationRow).join(OrganizationMembershipRow, OrganizationMembershipRow.user_id == UserRow.id).join(OrganizationRow, OrganizationRow.id == OrganizationMembershipRow.organization_id).where(OrganizationMembershipRow.organization_id == organization_id)
+            items: list[tuple[User, MembershipSummary]] = []
+            for user_row, membership_row, org_row in session.execute(stmt).all():
+                user = self._to_user(user_row)
+                if user is None:
+                    continue
+                membership = MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active")
+                items.append((user, membership))
+            return items
+
+    def update_organization_membership(self, organization_id: str, user_id: str, *, role: str | None = None, active: bool | None = None) -> tuple[User, MembershipSummary]:
+        if select is None:
+            raise KeyError("membership not found")
+        with self.session_factory() as session:
+            membership_row = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == organization_id, OrganizationMembershipRow.user_id == user_id)).scalar_one_or_none()
+            if membership_row is None:
+                raise KeyError("membership not found")
+            if role is not None:
+                membership_row.role = role
+            if active is not None:
+                membership_row.status = "active" if active else "inactive"
+            membership_row.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            user = self._to_user(session.get(UserRow, user_id))
+            org = session.get(OrganizationRow, organization_id)
+            if user is None or org is None:
+                raise KeyError("membership not found")
+            membership = MembershipSummary(organization=OrganizationSummary(id=org.id, name=org.name, slug=org.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active")
+            return user, membership

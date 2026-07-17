@@ -6,10 +6,12 @@ from vigia_api.services.auth import InMemoryAuthRepository
 from vigia_api.services.invites import InviteService
 from vigia_api.services.security import hash_password, hash_token
 from vigia_api.api.v1 import invites as invites_api
+from vigia_api.security.rate_limit import rate_limiter
 
 
 class InviteTest(unittest.TestCase):
     def setUp(self) -> None:
+        rate_limiter._windows.clear()
         self.auth_repo = InMemoryAuthRepository()
         admin = User(id="platform-admin", email="owner@vigia.local", full_name="Owner", password_hash=hash_password("pw"), platform_role=PlatformRole.PLATFORM_OWNER)
         self.auth_repo.add_user(admin)
@@ -54,7 +56,7 @@ class InviteTest(unittest.TestCase):
             app = type("App", (), {"state": type("State", (), {})()})()
 
         payload = invites_api.InviteIn(email="route@vigia.local", role="auditor_viewer")
-        result = invites_api.create_invite("org-1", payload, request=Request(), membership=Membership(), current_user=CurrentUser())
+        result = invites_api.create_invite("org-1", payload, request=Request(), membership=Membership(), current_user=CurrentUser())  # type: ignore[arg-type]
         self.assertEqual(result["invite"]["invited_by_user_id"], "platform-admin")
 
     def test_accept_route_does_not_expose_password_hash(self) -> None:
@@ -70,7 +72,7 @@ class InviteTest(unittest.TestCase):
         previous_service = invites_api.service
         invites_api.service = self.service
         try:
-            result = invites_api.accept_invite(invites_api.AcceptInviteIn(token=token, email="safe@vigia.local", full_name="Safe User", password="pw123"), request=Request())
+            result = invites_api.accept_invite(invites_api.AcceptInviteIn(token=token, email="safe@vigia.local", full_name="Safe User", password="pw123"), request=Request())  # type: ignore[arg-type]
         finally:
             invites_api.service = previous_service
         self.assertEqual(result["user"]["email"], "safe@vigia.local")

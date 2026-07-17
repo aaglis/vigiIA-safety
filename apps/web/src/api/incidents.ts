@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import type { Metadata } from './types'
 
 export type IncidentStatus = 'open' | 'acknowledged' | 'resolved' | 'dismissed'
 
@@ -14,7 +15,7 @@ export interface Incident {
   severity: string
   summary: string
   confidence: number | null
-  metadata: Record<string, unknown>
+  metadata: Metadata
   status: IncidentStatus
   created_at: string
   updated_at: string
@@ -32,7 +33,7 @@ export interface AuditLogEntry {
   to_status: string
   actor: string
   created_at: string
-  metadata: Record<string, unknown>
+  metadata: Metadata
 }
 
 export interface IncidentListResponse {
