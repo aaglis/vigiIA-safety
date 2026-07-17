@@ -25,3 +25,15 @@ test-results/
 infra/compose/docker-compose.local.yml
 infra/compose/.env.local
 infra/compose/*-local-data/
+
+# compose local overrides
+infra/compose/.env
+
+# Sessao gravada pela suite live do Playwright (contem tokens reais de auth)
+apps/web/tests-live/.auth/
+
+# Skills/plugins locais da ferramenta de desenvolvimento, nao do produto
+# (.claude/skills sao symlinks para .agents/, iriam quebrados para o repo)
+.agents/
+.claude/skills/
+skills-lock.json

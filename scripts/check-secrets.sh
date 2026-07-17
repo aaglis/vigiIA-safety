@@ -12,6 +12,10 @@ ROOT = Path('.')
 EXCLUDED_DIRS = {
     '.git', '.github', '.pytest_cache', '.mypy_cache', '.ruff_cache',
     '__pycache__', 'node_modules', 'dist', 'build', '.venv', 'venv',
+    # Artefatos gerados por testes (bundles minificados dão falso positivo).
+    'playwright-report', 'test-results',
+    # Config local de ferramenta do dev, fora do versionamento.
+    '.claude', '.agents',
 }
 EXCLUDED_FILES = {
     '.env.example',
@@ -29,7 +33,7 @@ TEXT_EXTENSIONS = {
     '.txt', '.yaml', '.yml', '.js', '.jsx', '.css', '.html', '.dockerfile',
 }
 SENSITIVE_NAMES = re.compile(
-    r'(?i)\b(jwt_secret|refresh_token_secret|secret_key|password|api_key|access_key|token|private_key|smtp_password|minio_secret_key|edge_worker_api_key)\b'
+    r'(?i)\b(jwt_secret|refresh_token_secret|secret_key|password|api_key|access_key|token|private_key|resend_api_key|minio_secret_key|edge_worker_api_key)\b'
 )
 ASSIGNMENT = re.compile(r'''(?ix)
     (?P<name>[A-Z0-9_]*(?:SECRET|PASSWORD|API_KEY|ACCESS_KEY|TOKEN|PRIVATE_KEY)[A-Z0-9_]*)
