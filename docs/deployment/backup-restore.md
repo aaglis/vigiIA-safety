@@ -63,6 +63,28 @@ POSTGRES_VOLUME_SMOKE_DATABASE_URL='postgresql+psycopg://user:pass@localhost:543
 
 O resultado esperado é JSON com medidas de listagem, filtros, detalhe, auditoria e evidência para 1k+ incidentes sintéticos, sem segredos nem URLs assinadas.
 
+### Execução isolada registrada
+
+Última execução sanitizada em ambiente local isolado:
+
+- `bash scripts/backup-restore-smoke.sh`: OK; dump PostgreSQL e snapshot MinIO gerados em diretório temporário, volumes recriados e dados demo (`admin@vigia.local`, `org-demo`) restaurados com sucesso.
+- `bash scripts/postgres-volume-smoke.sh` com Postgres isolado e 1k incidentes sintéticos: OK; nenhum segredo, URL assinada ou dado real foi registrado.
+
+Resultado de volume PostgreSQL com 1k incidentes sintéticos:
+
+| Caminho medido | Itens | Tempo |
+| --- | ---: | ---: |
+| Primeira página | 50 | 25.372ms |
+| Filtro status aberto | 50 | 10.412ms |
+| Filtro severidade alta | 50 | 7.805ms |
+| Filtro site/câmera/zona | 50 | 4.435ms |
+| Filtro últimos 7 dias | 50 | 10.776ms |
+| Detalhe | 1 | 1.800ms |
+| Auditoria | 1 | 2.564ms |
+| Evidência metadata-only | 1 | 1.578ms |
+
+Recomendação atual: manter índices para `organization_id + created_at`, `organization_id + status + severity` e o combo site/câmera/zona mais usado pelo cliente, reavaliando com dados sintéticos maiores antes de produção.
+
 ## Restore local manual
 ### PostgreSQL
 ```bash
