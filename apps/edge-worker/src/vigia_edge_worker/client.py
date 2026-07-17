@@ -48,6 +48,11 @@ class EdgeApiClient:
     def send_detection(self, payload: dict) -> dict:
         return self._request("POST", "/edge-workers/me/detections", payload)
 
+    def publish_frame_analysis(self, payload: dict) -> dict:
+        """O que a CV vê no frame atual (só coordenadas). Best-effort: alimenta o overlay
+        ao vivo e não pode atrapalhar o pipeline de incidentes se falhar."""
+        return self._request("POST", "/edge-workers/me/frame-analysis", payload)
+
     def send_detection_with_retry(self, payload: dict, attempts: int = 1) -> dict:
         last_error: Exception | None = None
         for _ in range(max(1, attempts)):

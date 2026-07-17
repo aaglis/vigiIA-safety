@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from collections import deque
 from uuid import uuid4
+from urllib.parse import quote
 
 from .config import default_config
 from .client import EdgeApiClient
@@ -16,6 +18,40 @@ from .mock_detector import detect_once
 from .rules import RuleEngine
 from .source import FrameSourceError, build_frame_source
 from .telemetry import TelemetryState, sanitize_error, structured_log
+
+
+def _with_worker_credentials(uri: str | None, config) -> str | None:
+    """O servidor de mídia do edge exige credencial para ler a câmera. O worker usa a
+    mesma que já tem para falar com a API — assim ele lê só as câmeras atribuídas a ele."""
+    if not uri or not config.edge_client_id or not config.edge_api_key:
+        return uri
+    if not uri.lower().startswith(("rtsp://", "rtmp://")):
+        return uri
+    scheme, remainder = uri.split("://", 1)
+    if "@" in remainder.split("/", 1)[0]:
+        return uri
+    return f"{scheme}://{quote(config.edge_client_id, safe='')}:{quote(config.edge_api_key, safe='')}@{remainder}"
+
+
+def _resolve_stream_uri(config, config_payload):
+    """Stream da câmera cadastrada (via /me/config) tem prioridade sobre o env."""
+    if config_payload:
+        cameras = config_payload.get("cameras") or []
+        if cameras:
+            match = next((c for c in cameras if c.get("id") == config.camera_id), None) or cameras[0]
+            return _with_worker_credentials(match.get("stream_identifier") or None, config)
+    return None
+
+
+def _publish_frame_analysis(client, detector, frame) -> None:
+    """Best-effort: o overlay ao vivo nunca pode derrubar o pipeline de incidentes."""
+    analysis = getattr(detector, "last_analysis", None)
+    if client is None or not analysis:
+        return
+    try:
+        client.publish_frame_analysis({"camera_id": frame.camera_id, "timestamp": frame.timestamp, **analysis})
+    except Exception as exc:
+        structured_log("edge_worker.frame_analysis_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="failed", error=sanitize_error(exc))
 
 
 def _build_detection(config, selection, frame, result):
@@ -37,20 +73,21 @@ def _build_detection(config, selection, frame, result):
     }
 
 
-def _evidence_payload(config, frame, upload_path=None, file_id=None):
+def _evidence_payload(config, frame, upload_path=None, file_id=None, image_bytes=None):
     fid = file_id or uuid4().hex
-    snapshot = build_snapshot(fid, frame, upload_path=upload_path)
+    snapshot = build_snapshot(fid, frame, upload_path=upload_path, image_bytes=image_bytes)
     return snapshot.to_dict()
 
 
-def _upload_frame_bytes(client, upload_ref: dict | None, frame, telemetry: TelemetryState | None = None) -> dict[str, object]:
+def _upload_frame_bytes(client, upload_ref: dict | None, frame, telemetry: TelemetryState | None = None, image_bytes: bytes | None = None) -> dict[str, object]:
+    data = image_bytes if image_bytes is not None else frame.image_bytes
     if not upload_ref:
         return {"upload_status": "skipped", "reason": "no_upload_ref"}
-    if not frame.image_bytes:
+    if not data:
         return {"upload_status": "skipped", "reason": "no_frame_bytes"}
     try:
         started = time.perf_counter()
-        result = client.upload_evidence_bytes(upload_ref, frame.image_bytes)
+        result = client.upload_evidence_bytes(upload_ref, data, content_type="image/jpeg")
         if telemetry is not None:
             telemetry.record_send_latency((time.perf_counter() - started) * 1000)
         structured_log("edge_worker.evidence_upload_ok", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="ok")
@@ -98,13 +135,19 @@ def _drain_buffer(client, buffer: DetectionBuffer, telemetry: TelemetryState | N
             buffer.mark_failed(buffered.event_id, buffered.payload, str(exc), attempts=buffered.attempts + 1)
 
 
+# Câmera ao vivo = loop infinito. O histórico existe para diagnóstico/teste, então é
+# limitado: sem isto, cada frame (JPEG) fica retido e o worker morre de OOM em horas.
+DIAGNOSTIC_HISTORY_FRAMES = 200
+
+
 def _run_pipeline(config, selection, detector, source, rules=None, client=None, api_mode: bool = False, buffer: DetectionBuffer | None = None):
     processed_frames = 0
     emitted_events = 0
-    detections = []
-    frames = []
-    detector_results = []
-    telemetry = TelemetryState(cv_mode=selection.cv_mode, source_type=config.edge_source_type, worker_version=config.worker_version)
+    history = config.edge_max_frames if config.edge_max_frames is not None else DIAGNOSTIC_HISTORY_FRAMES
+    detections = deque(maxlen=history)
+    frames = deque(maxlen=history)
+    detector_results = deque(maxlen=history)
+    telemetry = TelemetryState(cv_mode=selection.cv_mode, source_type=getattr(source, "source_type", config.edge_source_type), worker_version=config.worker_version)
     for frame in source.frames():
         infer_started = time.perf_counter()
         results = detector.detect(frame)
@@ -112,16 +155,19 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
         frames.append(frame)
         detector_results.append(results[0] if results else None)
         processed_frames += 1
+        if api_mode:
+            _publish_frame_analysis(client, detector, frame)
         if not results:
             if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
                 break
             continue
         file_id = uuid4().hex
+        annotated = getattr(results[0], "annotated_jpeg", None)
         upload_ref = None
         if api_mode and client is not None:
             upload_ref = _safe_request_evidence_upload(client, file_id, buffer=buffer)
-        upload_result = _upload_frame_bytes(client, upload_ref, frame, telemetry=telemetry) if api_mode and client is not None else {"upload_status": "skipped", "reason": "api_disabled"}
-        evidence_payload = _evidence_payload(config, frame, upload_path=upload_ref.get("upload_path") if upload_ref else None, file_id=file_id)
+        upload_result = _upload_frame_bytes(client, upload_ref, frame, telemetry=telemetry, image_bytes=annotated) if api_mode and client is not None else {"upload_status": "skipped", "reason": "api_disabled"}
+        evidence_payload = _evidence_payload(config, frame, upload_path=upload_ref.get("upload_path") if upload_ref else None, file_id=file_id, image_bytes=annotated)
         evidence_payload.update(upload_result)
         applied = rules.apply(frame, results[0]) if rules is not None else None
         if rules is not None and applied is None:
@@ -162,7 +208,7 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
             structured_log("edge_worker.heartbeat_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=config.camera_id, site_id=config.site_id, organization_id=config.organization_id, latency_ms=None, result="failed", error=exc)
             if buffer is None:
                 raise
-    return {"detections": detections, "heartbeat": heartbeat, "processed_frames": processed_frames, "emitted_events": emitted_events, "frames": frames, "detector_results": detector_results, "telemetry": telemetry}
+    return {"detections": list(detections), "heartbeat": heartbeat, "processed_frames": processed_frames, "emitted_events": emitted_events, "frames": list(frames), "detector_results": list(detector_results), "telemetry": telemetry}
 
 
 def main() -> int:
@@ -176,7 +222,6 @@ def main() -> int:
     config = default_config()
     selection = DetectorSelection(cv_mode=config.cv_mode, cv_real_enabled=config.cv_real_enabled, cv_real_marker=config.cv_real_marker, cv_real_model_version=config.cv_real_model_version)
     detector = build_detector(config, selection)
-    source = build_frame_source(config)
     rules = RuleEngine(cooldown_seconds=config.edge_detection_cooldown_seconds)
     buffer = DetectionBuffer(config.edge_buffer_path, max_attempts=config.edge_buffer_max_attempts, backoff_seconds=config.edge_buffer_backoff_seconds) if config.edge_buffer_path else None
 
@@ -209,13 +254,18 @@ def main() -> int:
         print(json.dumps({"mode": "local", "source_type": config.edge_source_type, "cv_mode": config.cv_mode}, ensure_ascii=False))
 
     def run_once() -> None:
+        config_payload = None
         if api_mode and client is not None:
             try:
                 config_payload = client.get_config()
                 rules.load_context(config_payload)
+                load_context = getattr(detector, "load_context", None)
+                if callable(load_context):
+                    load_context(config_payload)
             except Exception:
                 if buffer is None:
                     raise
+        source = build_frame_source(config, stream_override=_resolve_stream_uri(config, config_payload))
         if api_mode and client is not None and buffer is not None:
             _drain_buffer(client, buffer, telemetry=TelemetryState(cv_mode=config.cv_mode, source_type=config.edge_source_type, worker_version=config.worker_version))
         result = _run_pipeline(config, selection, detector, source, rules=rules, client=client, api_mode=api_mode, buffer=buffer)

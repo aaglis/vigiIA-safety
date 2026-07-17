@@ -18,8 +18,13 @@ class WorkerConfig:
     cv_real_enabled: bool = False
     cv_real_marker: str | None = None
     cv_real_model_version: str = "real-cv-0"
+    cv_model_path: str | None = None
+    cv_confidence_threshold: float = 0.4
     edge_source_type: str = "mock"
     edge_source_uri: str | None = None
+    edge_video_frame_stride: int = 15
+    edge_reconnect_backoff_seconds: float = 2.0
+    edge_reconnect_max_backoff_seconds: float = 30.0
     edge_frame_interval_seconds: float = 0.0
     edge_max_frames: int | None = None
     edge_detection_cooldown_seconds: int = 0
@@ -44,8 +49,13 @@ def default_config() -> WorkerConfig:
         cv_real_enabled=os.environ.get("CV_REAL_ENABLED", "false").lower() in {"1", "true", "yes"},
         cv_real_marker=os.environ.get("CV_REAL_MARKER"),
         cv_real_model_version=os.environ.get("CV_REAL_MODEL_VERSION", "real-cv-0"),
+        cv_model_path=os.environ.get("CV_MODEL_PATH"),
+        cv_confidence_threshold=float(os.environ.get("CV_CONFIDENCE_THRESHOLD", "0.4")),
         edge_source_type=os.environ.get("EDGE_SOURCE_TYPE", "mock"),
         edge_source_uri=os.environ.get("EDGE_SOURCE_URI"),
+        edge_video_frame_stride=int(os.environ.get("EDGE_VIDEO_FRAME_STRIDE", "15")),
+        edge_reconnect_backoff_seconds=float(os.environ.get("EDGE_RECONNECT_BACKOFF_SECONDS", "2")),
+        edge_reconnect_max_backoff_seconds=float(os.environ.get("EDGE_RECONNECT_MAX_BACKOFF_SECONDS", "30")),
         edge_frame_interval_seconds=float(os.environ.get("EDGE_FRAME_INTERVAL_SECONDS", "0")),
         edge_max_frames=int(os.environ["EDGE_MAX_FRAMES"]) if os.environ.get("EDGE_MAX_FRAMES") else None,
         edge_detection_cooldown_seconds=int(os.environ.get("EDGE_DETECTION_COOLDOWN_SECONDS", "0")),

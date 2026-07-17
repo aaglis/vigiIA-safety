@@ -19,6 +19,6 @@ class EvidenceSnapshot:
         return {key: value for key, value in asdict(self).items() if value is not None}
 
 
-def build_snapshot(file_id: str, frame: FrameInput, upload_path: str | None = None) -> EvidenceSnapshot:
-    data = frame.image_bytes or b""
+def build_snapshot(file_id: str, frame: FrameInput, upload_path: str | None = None, image_bytes: bytes | None = None) -> EvidenceSnapshot:
+    data = (image_bytes if image_bytes is not None else frame.image_bytes) or b""
     return EvidenceSnapshot(file_id=file_id, size=len(data), sha256_hex=sha256(data).hexdigest(), frame_timestamp=frame.timestamp, source_type=str(frame.metadata.get("source_type", "mock")), upload_path=upload_path)
