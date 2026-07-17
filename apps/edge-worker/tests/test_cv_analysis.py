@@ -52,3 +52,33 @@ class PpeHelmetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PpeWithoutHelmetClassTest(unittest.TestCase):
+    """Modelo que não enxerga capacete não pode acusar ausência de capacete.
+
+    Com o COCO (yolov8n), a lista de capacetes vem sempre vazia — o ramo person+helmet
+    concluía "ninguém está de capacete" e acusava 100% das pessoas na zona de EPI.
+    """
+
+    def setUp(self):
+        self.pessoa = DetectedBox(category="person", confidence=0.9, bbox=(0.4, 0.3, 0.6, 0.9))
+        self.zona_ppe = {"id": "z-ppe", "zone_type": "ppe", "polygon_json": {}}
+
+    def test_modelo_sem_classe_de_capacete_nao_acusa_epi(self):
+        violacoes = evaluate_violations([self.pessoa], [self.zona_ppe], [], head_class_available=False, can_see_helmet=False)
+        self.assertEqual(violacoes, [], "acusou EPI com modelo que não vê capacete")
+
+    def test_modelo_com_capacete_continua_detectando_ausencia(self):
+        violacoes = evaluate_violations([self.pessoa], [self.zona_ppe], [], head_class_available=False, can_see_helmet=True)
+        self.assertEqual([v.event_type for v in violacoes], ["ppe_violation"])
+
+    def test_pessoa_usando_capacete_nao_vira_violacao(self):
+        capacete = DetectedBox(category="helmet", confidence=0.8, bbox=(0.45, 0.31, 0.55, 0.4))
+        violacoes = evaluate_violations([self.pessoa, capacete], [self.zona_ppe], [], head_class_available=False, can_see_helmet=True)
+        self.assertEqual(violacoes, [])
+
+    def test_intrusao_continua_funcionando_sem_classe_de_capacete(self):
+        zona_restrita = {"id": "z-rest", "zone_type": "restricted", "polygon_json": {}}
+        violacoes = evaluate_violations([self.pessoa], [zona_restrita], [], head_class_available=False, can_see_helmet=False)
+        self.assertEqual([v.event_type for v in violacoes], ["restricted_intrusion"])

@@ -47,6 +47,10 @@ class TelemetryState:
     send_latencies_ms: deque[float] = field(default_factory=lambda: deque(maxlen=LATENCY_WINDOW))
     last_error: str | None = None
     last_result: str | None = None
+    # Regras que o modelo carregado NÃO consegue avaliar (ex.: EPI sem classe de capacete).
+    # Vai no heartbeat: o operador precisa saber que a regra está inativa, e não confundir
+    # "nenhum incidente" com "tudo certo".
+    inactive_rules: list[str] = field(default_factory=list)
 
     def record_inference_latency(self, value_ms: float) -> None:
         self.inference_latencies_ms.append(value_ms)
@@ -74,6 +78,7 @@ class TelemetryState:
             "pending_queue": self.pending_queue,
             "avg_inference_latency_ms": round(mean(self.inference_latencies_ms), 4) if self.inference_latencies_ms else 0.0,
             "avg_send_latency_ms": round(mean(self.send_latencies_ms), 4) if self.send_latencies_ms else 0.0,
+            "inactive_rules": list(self.inactive_rules),
             "last_error": self.last_error,
             "last_result": self.last_result,
         }

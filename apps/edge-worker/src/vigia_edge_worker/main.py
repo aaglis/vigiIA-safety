@@ -148,6 +148,10 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
     frames = deque(maxlen=history)
     detector_results = deque(maxlen=history)
     telemetry = TelemetryState(cv_mode=selection.cv_mode, source_type=getattr(source, "source_type", config.edge_source_type), worker_version=config.worker_version)
+    # O modelo carregado pode não ter como avaliar EPI. Isso precisa ficar visível: sem
+    # o aviso, "zero incidentes de EPI" parece conformidade quando é cegueira.
+    if getattr(detector, "_uses_yolo", lambda: False)() and not getattr(detector, "can_see_helmet", True):
+        telemetry.inactive_rules.append("ppe_violation:modelo-sem-classe-de-capacete")
     for frame in source.frames():
         infer_started = time.perf_counter()
         results = detector.detect(frame)

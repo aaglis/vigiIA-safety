@@ -71,7 +71,15 @@ def evaluate_violations(
     required_ppe: list[dict[str, Any]],
     *,
     head_class_available: bool,
+    can_see_helmet: bool = True,
 ) -> list[Violation]:
+    """`can_see_helmet` diz se o modelo carregado tem alguma classe de capacete.
+
+    Sem ela, a zona de EPI NÃO é avaliada: um modelo que não enxerga capacete acusaria
+    100% das pessoas de estarem sem ele (a lista de capacetes vem sempre vazia, e
+    "nenhum capacete casado" viraria violação). Não se afirma a ausência do que não se
+    sabe ver — melhor não reportar nada e sinalizar a incapacidade.
+    """
     persons = [b for b in boxes if b.category == CATEGORY_PERSON]
     helmets = [b for b in boxes if b.category == CATEGORY_HELMET]
     bare_heads = [b for b in boxes if b.category == CATEGORY_NO_HELMET]
@@ -92,6 +100,8 @@ def evaluate_violations(
 
     # EPI (capacete) em zona de EPI.
     for zone in ppe_zones:
+        if not can_see_helmet:
+            continue
         if not _ppe_requires_helmet(required_ppe):
             continue
         polygon = parse_polygon(zone.get("polygon_json"))

@@ -62,6 +62,13 @@ class RealDetector:
     def _uses_yolo(self) -> bool:
         return bool(self.config.cv_model_path)
 
+    @property
+    def can_see_helmet(self) -> bool:
+        """O modelo carregado tem alguma classe de capacete? Derivado das classes reais —
+        se fosse uma flag setada só ao carregar o modelo, ficaria dessincronizado sempre
+        que as classes viessem por outro caminho."""
+        return bool(set(self._class_categories.values()) & {"helmet", "no_helmet"})
+
     def detect(self, frame: FrameInput) -> list[DetectionResult]:
         if not self.real_config.enabled:
             raise RealDetectorError("real detector disabled: set CV_REAL_ENABLED=1")
@@ -121,7 +128,7 @@ class RealDetector:
             boxes.append(DetectedBox(category=category, confidence=confidence, bbox=norm))
             raw.append({"category": category, "confidence": round(confidence, 3), "bbox": [round(v, 4) for v in norm]})
 
-        violations = evaluate_violations(boxes, self._zones, self._required_ppe, head_class_available=self._has_no_helmet_class)
+        violations = evaluate_violations(boxes, self._zones, self._required_ppe, head_class_available=self._has_no_helmet_class, can_see_helmet=self.can_see_helmet)
         violations.sort(key=lambda v: (_SEVERITY_ORDER.get(v.event_type, 9), -v.confidence))
         # Sem violação também interessa ao overlay ao vivo: a pessoa em conformidade
         # aparece na tela do cliente. Por isso a análise é registrada antes do early return.
