@@ -1,0 +1,33 @@
+# Câmeras de desenvolvimento — NÃO faz parte do produto.
+#
+# Em produção, câmera é equipamento do cliente: a IP publica RTSP e o nosso worker
+# consome. Aqui, este stack faz o papel dessas câmeras: cada vídeo em CAMERAS_VIDEO_DIR
+# vira uma câmera RTSP em loop, acessível por URL — igual à real.
+#
+#   docker compose -f docker-compose.cameras.yml up -d     # liga as câmeras
+#   docker compose -f docker-compose.cameras.yml down      # desliga
+#
+# Um vídeo `patio-sul.mp4` na pasta vira, sem editar nada:
+#   rtsp://cameras:8554/cam-patio-sul        (para o worker, dentro da rede)
+#   http://localhost:8889/cam-patio-sul/whep (para o navegador)
+
+services:
+  cameras:
+    image: bluenviron/mediamtx:1.9.3-ffmpeg
+    container_name: vigia-cameras
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      MTX_CONFPATH: /mediamtx.yml
+    volumes:
+      - ./cameras/mediamtx.yml:/mediamtx.yml:ro
+      - ${CAMERAS_VIDEO_DIR:-../../apps/edge-worker/assets}:/videos:ro
+    ports:
+      - "${MEDIAMTX_RTSP_PORT:-8554}:8554"
+      - "${MEDIAMTX_WEBRTC_PORT:-8889}:8889"
+
+# Mesma rede do sistema: o edge worker precisa alcançar as câmeras por hostname, como
+# alcançaria as câmeras na LAN da planta.
+networks:
+  default:
+    name: vigia-dev

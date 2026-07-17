@@ -36,13 +36,29 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: vigia # dev-only
-      MINIO_ROOT_PASSWORD: vigia12345 # dev-only
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vigia} # dev-only
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-vigia12345} # dev-only
     volumes:
       - minio-data:/data
     ports:
       - "${MINIO_HOST_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+
+  # Cria o bucket de evidência no MinIO (o dev não tinha esse passo).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vigia}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-vigia12345}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done;
+        mc mb --ignore-existing local/vigia-evidence-private
 
   api:
     image: vigia-api:dev
@@ -57,10 +73,21 @@ services:
       REDIS_URL: redis://redis:6379/0
       RATE_LIMIT_BACKEND: redis
       MINIO_ENDPOINT: http://minio:9000
+      S3_ENDPOINT_URL: http://minio:9000
+      # Host que o NAVEGADOR acessa: as URLs assinadas de download são geradas com ele.
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:${MINIO_HOST_PORT:-9000}
+      ALLOW_INTERNAL_S3_ENDPOINT: "true"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-vigia}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-vigia12345}
       JWT_SECRET: dev-only-jwt-secret-change-me
       REFRESH_TOKEN_SECRET: dev-only-refresh-secret-change-me
-      SMTP_HOST: smtp.dev.local
-      SMTP_PORT: 1025
+      # Sem RESEND_API_KEY o alerta cai em mock (não envia). Defina no infra/compose/.env
+      # junto de INCIDENT_NOTIFICATION_MODE=resend para enviar de verdade.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-alerts@vigia.local}
+      INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      # Lista => precisa ser JSON (pydantic-settings), ex.: ["a@b.com","c@d.com"]
+      INCIDENT_NOTIFICATION_RECIPIENTS: '${INCIDENT_NOTIFICATION_RECIPIENTS:-["ops@vigia.local"]}'
       EDGE_WORKER_CLIENT_ID: dev-client-id
       EDGE_WORKER_API_KEY: dev-api-key
     depends_on:
@@ -70,6 +97,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       seed:
@@ -109,6 +138,7 @@ services:
       DATABASE_URL: postgresql+psycopg://vigia:vigia@postgres:5432/vigia
       EDGE_WORKER_CLIENT_ID: dev-client-id
       EDGE_WORKER_API_KEY: dev-api-key
+      DEMO_CAMERA_STREAM: ${DEMO_CAMERA_STREAM:-rtsp://cameras:8554/cam-sample-ppe}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -123,21 +153,55 @@ services:
     environment:
       APP_ENV: dev
       WEB_API_BASE_URL: http://localhost:8000/api/v1
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
-      - "${WEB_HOST_PORT:-5173}:5173"
+      - "${WEB_HOST_PORT:-5173}:80"
 
+  # Worker de visão computacional. NÃO sobe no `up` normal — só com o profile `cv`:
+  #   docker compose --profile cv up
   edge-worker:
     image: vigia-edge-worker:dev
     build:
       context: ../../apps/edge-worker
+    profiles: ["cv"]
+    restart: unless-stopped
+    # Teto de recursos: torch+YOLO usam ~1.5-2GB. Se estourar, o Docker mata só este
+    # container (OOM), sem travar o PC. cpus deixa folga para o sistema.
+    mem_limit: 3g
+    cpus: 3.0
     environment:
       APP_ENV: dev
       EDGE_API_BASE_URL: http://api:8000/api/v1
       EDGE_CLIENT_ID: dev-client-id # dev-only
       EDGE_API_KEY: dev-api-key # dev-only
-      EDGE_RUN_ONCE: "true"
+      CV_MODE: real
+      CV_REAL_ENABLED: "1"
+      # yolov8n (COCO) já detecta 'person' p/ intrusão; troque por um modelo de EPI
+      # (com classe helmet/head) montado em /models para validar capacete.
+      CV_MODEL_PATH: ${CV_MODEL_PATH:-yolov8n.pt}
+      CV_CONFIDENCE_THRESHOLD: ${CV_CONFIDENCE_THRESHOLD:-0.4}
+      EDGE_VIDEO_FRAME_STRIDE: ${EDGE_VIDEO_FRAME_STRIDE:-15}
+      # false = fica vivo como câmera 24/7 (default: é o que a produção faz e o que o
+      # dev deve exercitar). true = processa a fonte uma vez e sai — só faz sentido
+      # quando a fonte é um arquivo de vídeo finito.
+      EDGE_RUN_ONCE: ${EDGE_RUN_ONCE:-false}
+      EDGE_POLL_INTERVAL_SECONDS: ${EDGE_POLL_INTERVAL_SECONDS:-30}
+      # Evita repetir o mesmo incidente a cada volta do loop contínuo.
+      EDGE_DETECTION_COOLDOWN_SECONDS: ${EDGE_DETECTION_COOLDOWN_SECONDS:-60}
+    volumes:
+      - ../../apps/edge-worker/assets:/assets:ro
+      - ../../apps/edge-worker/models:/models:ro
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+# Rede nomeada: o stack de câmeras (docker-compose.cameras.yml) entra nela para o worker
+# alcançar as câmeras por hostname, como faria na LAN da planta.
+networks:
+  default:
+    name: vigia-dev
 
 volumes:
   postgres-data:
