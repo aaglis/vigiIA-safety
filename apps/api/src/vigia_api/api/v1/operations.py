@@ -31,8 +31,14 @@ except Exception:  # pragma: no cover
 
                 return decorator
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from ...container import default_container
 from ...domain.auth import Permission
+from ...domain.operations import EntityStatus, ZoneType, validate_stream_identifier
+from ...settings import settings
+from ...security.csrf import require_csrf
+from ...security.origin import validate_origin_or_referer
 from ...security.dependencies import get_current_organization_membership, require_permission
 
 router = APIRouter(tags=["operations"])
@@ -47,6 +53,59 @@ def _service(request: Request | None):
 def _assert_organization_access(organization_id: str, membership) -> None:
     if membership.organization.id != organization_id:
         raise HTTPException(status_code=403, detail="organization access denied")
+
+
+class SiteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    address: str | None = None
+    status: EntityStatus = EntityStatus.ACTIVE
+
+
+class CameraIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str
+    name: str
+    stream_identifier: str
+    status: EntityStatus = EntityStatus.ACTIVE
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ZoneIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str
+    camera_id: str
+    zone_type: ZoneType
+    polygon_json: dict[str, Any] = Field(default_factory=dict)
+    status: EntityStatus = EntityStatus.ACTIVE
+
+
+def _serialize_site_entity(site) -> dict[str, Any]:
+    return {"id": site.id, "organization_id": site.organization_id, "name": site.name, "address": site.address, "status": site.status.value}
+
+
+def _serialize_camera_entity(camera) -> dict[str, Any]:
+    return {"id": camera.id, "organization_id": camera.organization_id, "site_id": camera.site_id, "name": camera.name, "stream_identifier": camera.stream_identifier, "status": camera.status.value, "metadata": camera.metadata}
+
+
+def _camera_metadata_with_source(stream_identifier: str, metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Valida o stream por ambiente (422 se inválido) e grava o source_type derivado no metadata."""
+    try:
+        source_type = validate_stream_identifier(stream_identifier, settings.app_env)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**(metadata or {}), "source_type": source_type}
+
+
+def _serialize_zone_entity(zone) -> dict[str, Any]:
+    return {"id": zone.id, "organization_id": zone.organization_id, "site_id": zone.site_id, "camera_id": zone.camera_id, "zone_type": zone.zone_type.value, "polygon_json": zone.polygon_json, "status": zone.status.value}
+
+
+def _key_error_status(exc: KeyError) -> int:
+    return 403 if exc.args and exc.args[0] == "cross-tenant relation denied" else 404
 
 
 def _serialize_site(site, cameras: list[dict[str, Any]], zones: list[dict[str, Any]], rules: list[dict[str, Any]], ppe: list[dict[str, Any]]) -> dict[str, Any]:
@@ -112,6 +171,76 @@ def _serialize_catalog(operations_repo, organization_id: str) -> dict[str, Any]:
 def get_catalog(organization_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
     _assert_organization_access(organization_id, membership)
     return _serialize_catalog(_service(request), organization_id)
+
+
+@router.post("/organizations/{organization_id}/operations/sites", dependencies=[Depends(require_permission("sites.manage")), Depends(require_csrf)])
+def create_site(organization_id: str, payload: SiteIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    try:
+        return {"site": _serialize_site_entity(_service(request).create_site(organization_id, payload.name, payload.address, payload.status))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+
+
+@router.patch("/organizations/{organization_id}/operations/sites/{site_id}", dependencies=[Depends(require_permission("sites.manage")), Depends(require_csrf)])
+def update_site(organization_id: str, site_id: str, payload: SiteIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    try:
+        return {"site": _serialize_site_entity(_service(request).update_site(organization_id, site_id, payload.name, payload.address, payload.status))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+
+
+@router.post("/organizations/{organization_id}/operations/cameras", dependencies=[Depends(require_permission("cameras.manage")), Depends(require_csrf)])
+def create_camera(organization_id: str, payload: CameraIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    metadata = _camera_metadata_with_source(payload.stream_identifier, payload.metadata)
+    try:
+        return {"camera": _serialize_camera_entity(_service(request).create_camera(organization_id, payload.site_id, payload.name, payload.stream_identifier, payload.status, metadata))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.patch("/organizations/{organization_id}/operations/cameras/{camera_id}", dependencies=[Depends(require_permission("cameras.manage")), Depends(require_csrf)])
+def update_camera(organization_id: str, camera_id: str, payload: CameraIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    metadata = _camera_metadata_with_source(payload.stream_identifier, payload.metadata)
+    try:
+        return {"camera": _serialize_camera_entity(_service(request).update_camera(organization_id, camera_id, payload.site_id, payload.name, payload.stream_identifier, payload.status, metadata))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/organizations/{organization_id}/operations/zones", dependencies=[Depends(require_permission("zones.manage")), Depends(require_csrf)])
+def create_zone(organization_id: str, payload: ZoneIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    try:
+        return {"zone": _serialize_zone_entity(_service(request).create_zone(organization_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.patch("/organizations/{organization_id}/operations/zones/{zone_id}", dependencies=[Depends(require_permission("zones.manage")), Depends(require_csrf)])
+def update_zone(organization_id: str, zone_id: str, payload: ZoneIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    validate_origin_or_referer(request)
+    _assert_organization_access(organization_id, membership)
+    try:
+        return {"zone": _serialize_zone_entity(_service(request).update_zone(organization_id, zone_id, payload.site_id, payload.camera_id, payload.zone_type, payload.polygon_json, payload.status))}
+    except KeyError as exc:
+        raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.get("/organizations/{organization_id}/operations/sites", dependencies=[Depends(require_permission(Permission.VIEW_DASHBOARD))])
