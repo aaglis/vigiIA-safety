@@ -18,6 +18,7 @@ export interface MeResponse {
     id: string
     email: string
     full_name?: string | null
+    platform_role?: 'platform_admin' | 'platform_support' | 'platform_owner' | string | null
   }
   memberships: Membership[]
   active_organization: OrganizationSummary | null
@@ -42,7 +43,7 @@ export interface LoginInput {
 export function login(payload: LoginInput) {
   return apiFetch<LoginResponse>('/auth/login', {
     method: 'POST',
-    body: toJsonBody(payload),
+    body: toJsonBody({ email: payload.email, password: payload.password }),
   })
 }
 

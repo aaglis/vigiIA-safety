@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -17,7 +17,18 @@
   --muted: #5f5951;
   --muted-2: #8e887b;
   --label: #988f84;
-  --line: rgba(32, 27, 24, 0.14);
+
+  /* borders & dividers */
+  --line: #e2ddd4;
+  --border: #e7e3dc;
+  --divider: #ede9e1;
+  --row: #f0ede6;
+
+  /* navigation */
+  --nav-text: #4a453e;
+  --nav-label: #a9a398;
+  --nav-active-bg: #f4e7df;
+  --nav-active-text: #b14a22;
 }
 
 html {
@@ -69,4 +80,18 @@ select {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2.6s ease-in-out infinite;
 }

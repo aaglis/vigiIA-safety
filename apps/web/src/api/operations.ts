@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import type { Metadata } from './types'
 
 export type OperationEntityStatus = 'active' | 'inactive' | 'suspended'
 export type OperationZoneType = 'access' | 'restricted' | 'ppe'
@@ -31,6 +32,7 @@ export interface OperationZone {
   camera_id: string
   zone_type: OperationZoneType
   status: OperationEntityStatus
+  polygon_json?: Metadata
 }
 
 export interface OperationSafetyRule {
@@ -40,7 +42,7 @@ export interface OperationSafetyRule {
   zone_id: string | null
   name: string
   status: OperationEntityStatus
-  metadata: Record<string, unknown>
+  metadata: Metadata
 }
 
 export interface OperationRequiredPPE {
@@ -66,12 +68,62 @@ export interface OperationListResponse<T> {
   items: T[]
 }
 
+export interface CreateSiteInput {
+  name: string
+  address?: string | null
+  status?: OperationEntityStatus
+}
+
+export interface CreateCameraInput {
+  site_id: string
+  name: string
+  stream_identifier: string
+  status?: OperationEntityStatus
+  metadata?: Metadata
+}
+
+export interface CreateZoneInput {
+  site_id: string
+  camera_id: string
+  zone_type: OperationZoneType
+  polygon_json?: Metadata
+  status?: OperationEntityStatus
+}
+
+export interface UpdateSiteInput extends CreateSiteInput {}
+export interface UpdateCameraInput extends CreateCameraInput {}
+export interface UpdateZoneInput extends CreateZoneInput {}
+
 function operationsPath(organizationId: string, path: string) {
   return `/organizations/${organizationId}/operations/${path}`
 }
 
 export function getOperationsCatalog(organizationId: string) {
   return apiFetch<OperationCatalog>(operationsPath(organizationId, 'catalog'))
+}
+
+export function createOperationSite(organizationId: string, payload: CreateSiteInput) {
+  return apiFetch<{ site: OperationSite }>(operationsPath(organizationId, 'sites'), { method: 'POST', body: JSON.stringify({ name: payload.name, address: payload.address ?? null, status: payload.status ?? 'active' }) })
+}
+
+export function updateOperationSite(organizationId: string, siteId: string, payload: UpdateSiteInput) {
+  return apiFetch<{ site: OperationSite }>(operationsPath(organizationId, `sites/${siteId}`), { method: 'PATCH', body: JSON.stringify({ name: payload.name, address: payload.address ?? null, status: payload.status ?? 'active' }) })
+}
+
+export function createOperationCamera(organizationId: string, payload: CreateCameraInput) {
+  return apiFetch<{ camera: OperationCamera }>(operationsPath(organizationId, 'cameras'), { method: 'POST', body: JSON.stringify({ site_id: payload.site_id, name: payload.name, stream_identifier: payload.stream_identifier, status: payload.status ?? 'active', metadata: payload.metadata ?? {} }) })
+}
+
+export function updateOperationCamera(organizationId: string, cameraId: string, payload: UpdateCameraInput) {
+  return apiFetch<{ camera: OperationCamera }>(operationsPath(organizationId, `cameras/${cameraId}`), { method: 'PATCH', body: JSON.stringify({ site_id: payload.site_id, name: payload.name, stream_identifier: payload.stream_identifier, status: payload.status ?? 'active', metadata: payload.metadata ?? {} }) })
+}
+
+export function createOperationZone(organizationId: string, payload: CreateZoneInput) {
+  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, 'zones'), { method: 'POST', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
+}
+
+export function updateOperationZone(organizationId: string, zoneId: string, payload: UpdateZoneInput) {
+  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, `zones/${zoneId}`), { method: 'PATCH', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
 }
 
 export function listOperationSites(organizationId: string) {
@@ -92,4 +144,15 @@ export function listSafetyRules(organizationId: string) {
 
 export function listRequiredPPE(organizationId: string) {
   return apiFetch<OperationListResponse<OperationRequiredPPE>>(operationsPath(organizationId, 'required-ppe'))
+}
+
+export interface CameraLiveTicket {
+  camera_id: string
+  protocol: string
+  whep_url: string
+  expires_at: string
+}
+
+export function getCameraLiveTicket(organizationId: string, cameraId: string) {
+  return apiFetch<CameraLiveTicket>(`${operationsPath(organizationId, 'cameras')}/${encodeURIComponent(cameraId)}/live`)
 }
