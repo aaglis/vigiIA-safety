@@ -15,6 +15,7 @@ from .services.incidents import InMemoryIncidentRepository
 from .services.invites import InviteService
 from .services.platform_admin import PlatformAdminService
 from .services.security import hash_token
+from .services.detection_stream import DetectionHub
 from .settings import Settings, settings
 from .services.operations import InMemoryOperationsRepository
 
@@ -36,6 +37,7 @@ class AppContainer:
     evidence_metadata_repository: object
     evidence_service: EvidenceService
     operations_repository: Any
+    detection_hub: Any = None
     session_factory: object | None = None
 
 
@@ -57,13 +59,23 @@ def build_container(config: Settings | None = None, *, repository_backend: str |
         from .persistence.operations_repository import SqlAlchemyOperationsRepository
         from .persistence.repositories import SqlAlchemyEdgeWorkerRepository, SqlAlchemyEvidenceRepository, SqlAlchemyIncidentRepository
 
-        incident_repository = SqlAlchemyIncidentRepository(session_factory)
+        from .persistence.invite_repository import SqlAlchemyInviteRepository
+        from .persistence.platform_repository import SqlAlchemyPlatformRepository
+        from .persistence.account_recovery_repository import SqlAlchemyAccountRecoveryRepository
+
+        incident_repository = SqlAlchemyIncidentRepository(session_factory, app_settings=config)
         edge_worker_repository = SqlAlchemyEdgeWorkerRepository(session_factory)
         evidence_metadata_repository = SqlAlchemyEvidenceRepository(session_factory)
         operations_repository = SqlAlchemyOperationsRepository(session_factory)
         auth_repository = SqlAlchemyAuthRepository(session_factory)
+        invite_repository = SqlAlchemyInviteRepository(session_factory)
+        platform_repository = SqlAlchemyPlatformRepository(session_factory)
+        recovery_repository = SqlAlchemyAccountRecoveryRepository(session_factory)
     else:
-        incident_repository = InMemoryIncidentRepository()
+        invite_repository = None
+        platform_repository = None
+        recovery_repository = None
+        incident_repository = InMemoryIncidentRepository(app_settings=config)
         edge_worker_repository = InMemoryEdgeWorkerRepository()
         evidence_metadata_repository = InMemoryEvidenceMetadataRepository()
         operations_repository = InMemoryOperationsRepository()
@@ -75,14 +87,15 @@ def build_container(config: Settings | None = None, *, repository_backend: str |
         repository_backend=backend,
         auth_repository=auth_repository,
         auth_service=auth_service,
-        account_recovery_service=AccountRecoveryService(auth_repository),
-        invite_service=InviteService(auth_repository),
-        platform_admin_service=PlatformAdminService(auth_repository),
+        account_recovery_service=AccountRecoveryService(auth_repository, repository=recovery_repository),
+        invite_service=InviteService(auth_repository, repository=invite_repository),
+        platform_admin_service=PlatformAdminService(auth_repository, repository=platform_repository),
         incident_repository=incident_repository,
         edge_worker_repository=edge_worker_repository,
         edge_worker_service=edge_worker_service,
         evidence_metadata_repository=evidence_metadata_repository,
         evidence_service=evidence_service,
+        detection_hub=DetectionHub(),
         operations_repository=operations_repository,
         session_factory=session_factory,
     )
