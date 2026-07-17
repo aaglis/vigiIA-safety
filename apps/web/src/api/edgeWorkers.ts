@@ -1,6 +1,20 @@
 import { apiFetch, toJsonBody } from './client'
 import type { JsonObject } from './types'
 
+export interface EdgeWorkerTelemetry {
+  cv_mode?: string
+  source_type?: string
+  processed_frames?: number
+  emitted_events?: number
+  pending_queue?: number
+  avg_inference_latency_ms?: number
+  /** Regras que o modelo carregado NÃO consegue avaliar (ex.: EPI sem classe de capacete).
+   *  Sem isto na tela, "zero incidentes" parece conformidade e pode ser cegueira. */
+  inactive_rules?: string[]
+  last_error?: string | null
+  state?: string
+}
+
 export interface EdgeWorker {
   id: string
   organization_id: string
@@ -10,6 +24,8 @@ export interface EdgeWorker {
   allowed_camera_ids: string[]
   api_key_suffix?: string | null
   last_heartbeat_at?: string | null
+  /** Última telemetria do heartbeat: latência, fila e regras que o modelo não avalia. */
+  last_telemetry?: EdgeWorkerTelemetry | null
   created_at?: string
   updated_at?: string
 }
@@ -69,4 +85,9 @@ export function submitEdgeWorkerDetection(clientId: string, apiKey: string, payl
 export function requestEdgeWorkerEvidenceUpload(clientId: string, apiKey: string, fileId: string) {
   const query = new URLSearchParams({ file_id: fileId })
   return apiFetch<Record<string, unknown>>(`/edge-workers/me/evidence-upload?${query.toString()}`, { method: 'POST', headers: { 'X-Edge-Client-Id': clientId, 'X-Edge-Api-Key': apiKey } })
+}
+
+/** Inventário de workers da organização, com a última telemetria de cada um. */
+export function listEdgeWorkers(organizationId: string) {
+  return apiFetch<{ items: EdgeWorker[] }>(`/organizations/${organizationId}/edge-workers`)
 }

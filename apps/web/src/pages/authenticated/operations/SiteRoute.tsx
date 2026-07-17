@@ -34,6 +34,7 @@ export function SiteRoute() {
     onOpenCamera,
     onBackToSites,
     onDeleteZone,
+    edgeWorkers,
   } = useOperations()
   const { openDraft, openEditSite, openEditCamera, openEditZone, lastEdgeWorker, openConfigCheck, openEdgeWorkerRegistration, canRegisterEdgeWorker } = useOperationsLayout()
   const [zonaExcluindo, setZonaExcluindo] = useState<string | null>(null)
@@ -66,13 +67,22 @@ export function SiteRoute() {
 
   const activeSite = operationSites.find((site) => site.id === siteId) ?? null
   const cameraById = useMemo(() => new Map(operationCameras.map((camera) => [camera.id, camera] as const)), [operationCameras])
+  // Inventário real da unidade. O worker registrado nesta sessão entra na frente caso a
+  // listagem ainda não o tenha (a query tem staleTime).
+  const siteWorkers = useMemo(() => {
+    const daUnidade = edgeWorkers.filter((worker) => worker.site_id === siteId)
+    if (lastEdgeWorker && lastEdgeWorker.site_id === siteId && !daUnidade.some((w) => w.id === lastEdgeWorker.id)) {
+      return [lastEdgeWorker, ...daUnidade]
+    }
+    return daUnidade
+  }, [edgeWorkers, lastEdgeWorker, siteId])
   const siteCameras = activeSite ? operationCameras.filter((camera) => camera.site_id === activeSite.id) : []
   const siteZones = activeSite ? operationZones.filter((zone) => zone.site_id === activeSite.id) : []
   const siteRules = activeSite ? operationRules.filter((rule) => rule.site_id === activeSite.id || (rule.zone_id ? siteZones.some((zone) => zone.id === rule.zone_id) : false)) : []
 
   // Worker (registrado nesta sessão) que autoriza a câmera — única fonte real de vínculo câmera↔worker no painel.
   const workerForCamera = (cameraId: string): EdgeWorker | null =>
-    lastEdgeWorker && lastEdgeWorker.allowed_camera_ids.includes(cameraId) ? lastEdgeWorker : null
+    siteWorkers.find((worker) => worker.allowed_camera_ids.includes(cameraId)) ?? null
 
   // Cenários de CV cobertos por uma câmera: zonas ancoradas nela + EPIs das regras dessas zonas.
   const scenariosForCamera = (cameraId: string) => {
@@ -102,7 +112,7 @@ export function SiteRoute() {
     { key: 'cameras', label: 'Câmeras', count: siteCameras.length },
     { key: 'zones', label: 'Zonas', count: siteZones.length },
     { key: 'rules', label: 'Regras & EPIs', count: siteRules.length },
-    { key: 'workers', label: 'Workers', count: lastEdgeWorker ? 1 : null },
+    { key: 'workers', label: 'Workers', count: siteWorkers.length || null },
     { key: 'tests', label: 'Testes CV', count: null },
   ]
 
@@ -375,7 +385,7 @@ export function SiteRoute() {
         {/* WORKERS */}
         {activeTab === 'workers' ? (
           <Panel
-            title={<span>Edge workers {lastEdgeWorker ? <span className="font-mono-ui text-[12px] font-normal text-[#A9A398]">1</span> : null}</span>}
+            title={<span>Edge workers {siteWorkers.length ? <span className="font-mono-ui text-[12px] font-normal text-[#A9A398]">{siteWorkers.length}</span> : null}</span>}
             action={
               <div className="flex items-center gap-3">
                 <button type="button" onClick={openConfigCheck} disabled={!canRegisterEdgeWorker} className={`text-[12px] font-medium ${canRegisterEdgeWorker ? 'text-[var(--ink)] hover:underline' : 'cursor-not-allowed text-[#C0BAB0]'}`}>Checar configuração</button>
@@ -388,25 +398,71 @@ export function SiteRoute() {
               <div className="mb-3.5 flex items-start gap-2.5 rounded-[9px] border border-[#E3D8C8] bg-[#F7F0E2] px-3.5 py-2.5">
                 <Icon name="lock" size={15} className="mt-0.5 flex-none text-[#946416]" />
                 <p className="text-[12px] leading-[1.5] text-[#5a4a2a]">
-                  Registro e checagem usam a <span className="font-semibold text-[#3f3212]">API real</span> (a chave aparece uma única vez). O inventário completo de workers da organização depende de um endpoint de listagem ainda pendente — aqui aparece o worker registrado nesta sessão.
+                  Registro e checagem usam a <span className="font-semibold text-[#3f3212]">API real</span> — a chave aparece uma única vez, no registro. Os dados abaixo vêm do heartbeat de cada worker.
                 </p>
               </div>
-              {lastEdgeWorker ? (
+              {siteWorkers.length > 0 ? (
                 <div className="grid gap-2.5 sm:grid-cols-2">
-                  <div className="rounded-[10px] border border-[#EDE9E1] bg-[var(--paper)] px-4 py-3.5">
+                  {siteWorkers.map((worker) => (
+                  <div key={worker.id} className="rounded-[10px] border border-[#EDE9E1] bg-[var(--paper)] px-4 py-3.5">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="truncate font-mono-ui text-[13px] font-medium text-[var(--ink)]">{lastEdgeWorker.client_id}</span>
+                      <span className="truncate font-mono-ui text-[13px] font-medium text-[var(--ink)]">{worker.client_id}</span>
                       <span className="flex flex-none items-center gap-1.5 text-[11px] text-[#8E887B]">
-                        <StatusDot color={lastEdgeWorker.last_heartbeat_at ? '#2F7D57' : '#C0BAB0'} />
-                        {lastEdgeWorker.last_heartbeat_at ? 'Online' : 'Aguardando 1º heartbeat'}
+                        <StatusDot color={worker.last_heartbeat_at ? '#2F7D57' : '#C0BAB0'} />
+                        {worker.last_heartbeat_at ? 'Online' : 'Aguardando 1º heartbeat'}
                       </span>
                     </div>
-                    <p className="truncate text-[12px] text-[#5F5951]">{lastEdgeWorker.name}</p>
-                    <p className="mt-1 font-mono-ui text-[11px] text-[#8E887B]">{lastEdgeWorker.allowed_camera_ids.length} câmeras liberadas</p>
+                    <p className="truncate text-[12px] text-[#5F5951]">{worker.name}</p>
+                    <p className="mt-1 font-mono-ui text-[11px] text-[#8E887B]">{worker.allowed_camera_ids.length} câmeras liberadas</p>
+
+                    {/* Telemetria do heartbeat. O aviso de regra inativa vem primeiro: sem
+                        ele, "zero incidentes" parece conformidade e pode ser cegueira do modelo. */}
+                    {(worker.last_telemetry?.inactive_rules?.length ?? 0) > 0 ? (
+                      <div className="mt-2.5 rounded-[8px] border border-[rgba(193,85,43,0.22)] bg-[rgba(193,85,43,0.07)] px-3 py-2" data-testid={`worker-inactive-rules-${worker.id}`}>
+                        <p className="flex items-start gap-1.5 text-[12px] leading-5 text-[#9e4120]">
+                          <Icon name="alert-triangle" size={12} className="mt-0.5 flex-none" />
+                          <span>
+                            <span className="font-semibold">Regra inativa neste worker:</span>{' '}
+                            {worker.last_telemetry?.inactive_rules?.includes('ppe_violation:modelo-sem-classe-de-capacete')
+                              ? 'o modelo carregado não detecta capacete, então a zona de EPI não é avaliada. Zero incidentes de EPI aqui não significa conformidade.'
+                              : worker.last_telemetry?.inactive_rules?.join(', ')}
+                          </span>
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {worker.last_telemetry ? (
+                      <dl className="mt-2.5 grid grid-cols-3 gap-2 border-t border-[#F0EDE6] pt-2.5" data-testid={`worker-telemetry-${worker.id}`}>
+                        <div>
+                          <dt className="font-mono-ui text-[9px] uppercase tracking-[0.1em] text-[#A9A398]">Inferência</dt>
+                          <dd className="mt-0.5 text-[12px] text-[var(--ink)]">
+                            {worker.last_telemetry.avg_inference_latency_ms != null ? `${Math.round(worker.last_telemetry.avg_inference_latency_ms)} ms` : '—'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="font-mono-ui text-[9px] uppercase tracking-[0.1em] text-[#A9A398]">Frames</dt>
+                          <dd className="mt-0.5 text-[12px] text-[var(--ink)]">{worker.last_telemetry.processed_frames ?? '—'}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-mono-ui text-[9px] uppercase tracking-[0.1em] text-[#A9A398]">Fila</dt>
+                          <dd className={`mt-0.5 text-[12px] ${(worker.last_telemetry.pending_queue ?? 0) > 0 ? 'text-[#946416]' : 'text-[var(--ink)]'}`}>
+                            {worker.last_telemetry.pending_queue ?? 0}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : null}
+
+                    {worker.last_telemetry?.last_error ? (
+                      <p className="mt-2 truncate font-mono-ui text-[11px] text-[#9e4120]" title={worker.last_telemetry.last_error}>
+                        último erro: {worker.last_telemetry.last_error}
+                      </p>
+                    ) : null}
+
                     <div className="mt-2.5 flex gap-3">
                       <button type="button" onClick={openConfigCheck} className="text-[12px] text-[var(--ink)] hover:underline">Checar</button>
                     </div>
                   </div>
+                  ))}
                   <div className="flex flex-col items-start justify-center gap-2 rounded-[10px] border border-dashed border-[#DCD7CC] bg-[var(--card)] px-4 py-3.5">
                     <p className="text-[12px] text-[#5F5951]">Provisionar outro worker para este ambiente.</p>
                     <button type="button" onClick={openEdgeWorkerRegistration} disabled={!canRegisterEdgeWorker} className={`flex items-center gap-1.5 text-[12px] font-medium ${canRegisterEdgeWorker ? 'text-[#B14A22] hover:underline' : 'cursor-not-allowed text-[#C0BAB0]'}`}>

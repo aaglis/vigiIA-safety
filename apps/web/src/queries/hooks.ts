@@ -5,6 +5,7 @@ import { getEvidenceDownloadUrl, listEvidence } from '../api/evidence'
 import { createInvite, listInvites, resendInvite, revokeInvite } from '../api/invites'
 import { deactivateMember, listMembers, updateMember } from '../api/members'
 import { createOperationCamera, createOperationSite, createOperationZone, deleteOperationCamera, deleteOperationSite, deleteOperationZone, getOperationsCatalog, updateOperationCamera, updateOperationSite, updateOperationZone } from '../api/operations'
+import { listEdgeWorkers } from '../api/edgeWorkers'
 import { queryKeys } from '../api/queryKeys'
 
 export function useCurrentUser(enabled = true) { return useQuery({ queryKey: queryKeys.currentUser, queryFn: me, enabled, retry: false }) }
@@ -15,6 +16,12 @@ export function useEvidence(orgId: string | null, incidentId: string | null, ena
 export function useOperationsCatalog(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.operationsCatalog(orgId) : ['operations-catalog', 'none'] as const, queryFn: () => getOperationsCatalog(orgId!), enabled: enabled && !!orgId, staleTime: 30_000 }) }
 export function useInvites(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.invites(orgId) : ['invites', 'none'] as const, queryFn: () => listInvites(orgId!), enabled: enabled && !!orgId, staleTime: 10_000 }) }
 export function useMembers(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.members(orgId) : ['members', 'none'] as const, queryFn: () => listMembers(orgId!), enabled: enabled && !!orgId, staleTime: 10_000 }) }
+
+export function useEdgeWorkers(orgId: string | null, enabled = true) {
+  // Telemetria muda a cada heartbeat (60s): 30s de staleTime mantém a aba Workers viva
+  // sem marretar a API.
+  return useQuery({ queryKey: orgId ? ['edge-workers', orgId] as const : ['edge-workers', 'none'] as const, queryFn: () => listEdgeWorkers(orgId!), enabled: enabled && !!orgId, staleTime: 30_000, refetchInterval: 60_000 })
+}
 
 export function useOperationMutations(orgId: string | null) {
   const qc = useQueryClient()

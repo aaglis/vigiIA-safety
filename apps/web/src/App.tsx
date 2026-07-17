@@ -24,7 +24,7 @@ import { OrganizationsPage } from './pages/authenticated/OrganizationsPage'
 import { UsersPage } from './pages/authenticated/UsersPage'
 import { Icon } from './components/ui/icons'
 import type { IconName } from './components/ui/icons'
-import { useOperationMutations } from './queries/hooks'
+import { useEdgeWorkers, useOperationMutations } from './queries/hooks'
 import { type AppSection, type Screen, normalizePathname, resolveRoute, routeForCamera, routeForSection, routeForSite } from './navigation/routes'
 import { OperationsProvider, type OperationsContextValue } from './pages/authenticated/operations/OperationsContext'
 import { formatAgoShort, formatBytes, formatClock, formatTimestamp, initialsFrom, normalizeApiError, readMetadataValueFromUnknown, selectOrganization, shortHash } from './utils/formatters'
@@ -97,6 +97,9 @@ export default function App() {
 
   const activeOrganization = useMemo(() => (meData ? selectOrganization(meData) : null), [meData])
   const operationMutations = useOperationMutations(activeOrganization?.id ?? null)
+  // Inventário real de workers (com telemetria). Antes a aba Workers só via o que fosse
+  // registrado na própria sessão, então worker provisionado antes nunca aparecia.
+  const edgeWorkersQuery = useEdgeWorkers(activeOrganization?.id ?? null, mode === 'live')
   const selectedIncident = useMemo(() => incidents.find((incident) => incident.id === selectedIncidentId) ?? null, [incidents, selectedIncidentId])
   const selectedEvidence = useMemo(
     () => evidenceItems.find((evidence) => evidence.file_id === selectedEvidenceId) ?? evidenceItems[0] ?? null,
@@ -927,7 +930,8 @@ export default function App() {
     onOpenCamera: goCamera,
     onBackToSites: () => goDashboard('operations'),
     onOpenIncidents: () => goDashboard('incidents'),
-  }), [operationSites, operationCameras, operationZones, operationRules, operationPpe, operationsLoading, operationsCatalog, activeCamerasCount, incidents, connectionTone, mode, meData, activeOrganization, loadCameraFrame, requestLiveTicket])
+    edgeWorkers: edgeWorkersQuery.data?.items ?? [],
+  }), [operationSites, operationCameras, operationZones, operationRules, operationPpe, operationsLoading, operationsCatalog, activeCamerasCount, incidents, connectionTone, mode, meData, activeOrganization, loadCameraFrame, requestLiveTicket, edgeWorkersQuery.data])
 
   const renderWorkspaceContent = () => {
     switch (workspaceSection) {

@@ -62,6 +62,19 @@ class EdgeWorkerCreateIn(BaseModel):
     allowed_camera_ids: list[str] = Field(default_factory=list)
 
 
+class EdgeWorkerHeartbeatIn(BaseModel):
+    """Espelha o heartbeat do worker (`build_heartbeat`). `status` carrega a telemetria:
+    latência de inferência, fila pendente, último erro e `inactive_rules` — as regras que
+    o modelo carregado não consegue avaliar."""
+
+    client_id: str | None = None
+    organization_id: str | None = None
+    site_id: str | None = None
+    sent_at: str | None = None
+    version: str | None = None
+    status: dict[str, Any] = Field(default_factory=dict)
+
+
 class EdgeWorkerDetectionIn(BaseModel):
     event_id: str | None = None
     organization_id: str | None = None
@@ -83,6 +96,33 @@ def _auth(client_id: str | None, api_key: str | None) -> tuple[str, str]:
     return client_id, api_key
 
 
+@router.get("/organizations/{organization_id}/edge-workers", dependencies=[Depends(require_permission("workers.manage"))])
+def list_workers(organization_id: str, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+    """Inventário de workers da organização, com a última telemetria de cada um.
+
+    Nunca devolve `api_key_hash`: a chave só existe em claro no instante do registro.
+    """
+    if membership.organization.id != organization_id:
+        raise HTTPException(status_code=403, detail="organization access denied")
+    workers = _service(request).list_workers(organization_id)
+    return {
+        "items": [
+            {
+                "id": w.id,
+                "organization_id": w.organization_id,
+                "site_id": w.site_id,
+                "name": w.name,
+                "client_id": w.client_id,
+                "allowed_camera_ids": w.allowed_camera_ids,
+                "status": w.status.value,
+                "last_heartbeat_at": w.last_heartbeat_at.isoformat() if w.last_heartbeat_at else None,
+                "last_telemetry": w.last_telemetry,
+            }
+            for w in workers
+        ]
+    }
+
+
 @router.post("/organizations/{organization_id}/edge-workers", status_code=201, dependencies=[Depends(require_permission("workers.register"))])
 def register_worker(organization_id: str, payload: EdgeWorkerCreateIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
     if payload.organization_id != organization_id:
@@ -101,10 +141,12 @@ def worker_config(request: Request, x_edge_client_id: str | None = Header(defaul
 
 
 @router.post("/edge-workers/me/heartbeat")
-def worker_heartbeat(request: Request, x_edge_client_id: str | None = Header(default=None, alias="X-Edge-Client-Id"), x_edge_api_key: str | None = Header(default=None, alias="X-Edge-Api-Key")) -> dict:
+def worker_heartbeat(payload: EdgeWorkerHeartbeatIn | None = None, request: Request = None, x_edge_client_id: str | None = Header(default=None, alias="X-Edge-Client-Id"), x_edge_api_key: str | None = Header(default=None, alias="X-Edge-Api-Key")) -> dict:
     client_id, api_key = _auth(x_edge_client_id, x_edge_api_key)
     try:
-        worker = _service(request).heartbeat(client_id, api_key)
+        # O `status` do heartbeat era descartado: o worker mandava latência, fila e
+        # regras inativas, e nada disso chegava a quem opera.
+        worker = _service(request).heartbeat(client_id, api_key, telemetry=payload.status if payload else None)
         return {"worker": worker.__dict__}
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

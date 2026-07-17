@@ -30,6 +30,8 @@ export type OperationsContextValue = {
   operationsCatalog: OperationCatalog | null
   activeCamerasCount: number
   incidents: Incident[]
+  /** Workers da organização, com a última telemetria recebida no heartbeat. */
+  edgeWorkers: EdgeWorker[]
   connectionTone: { border: string; bg: string; color: string; dot: string; label: string }
   mode: 'live' | 'demo' | null
   ENTITY_STATUS_BADGE: EntityStatusBadge

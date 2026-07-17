@@ -481,6 +481,7 @@ class SqlAlchemyEdgeWorkerRepository:
             allowed_camera_ids=json.loads(row.allowed_camera_ids or "[]"),
             status=EdgeWorkerStatus(row.status),
             last_heartbeat_at=self._ensure_aware_utc(row.last_heartbeat_at),
+            last_telemetry=json.loads(row.last_telemetry_json) if row.last_telemetry_json else None,
             created_at=cast(datetime, self._ensure_aware_utc(row.created_at, default_now=True)),
             updated_at=cast(datetime, self._ensure_aware_utc(row.updated_at, default_now=True)),
         )
@@ -528,7 +529,7 @@ class SqlAlchemyEdgeWorkerRepository:
                 session.delete(row)
                 session.commit()
 
-    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at) -> None:
+    def update_last_heartbeat(self, worker_id: str, last_heartbeat_at, telemetry: dict | None = None) -> None:
         if self.session_factory is None:
             return
         with self.session_factory() as session:
@@ -536,6 +537,8 @@ class SqlAlchemyEdgeWorkerRepository:
             if row is None:
                 return
             row.last_heartbeat_at = last_heartbeat_at
+            if telemetry is not None:
+                row.last_telemetry_json = json.dumps(telemetry)
             session.commit()
 
     def update_status(self, worker_id: str, status: str | EdgeWorkerStatus) -> None:
