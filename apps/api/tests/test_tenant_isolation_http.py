@@ -8,6 +8,7 @@ from vigia_api.domain.evidence import EvidenceKind, EvidenceSource
 from vigia_api.domain.incidents import parse_detection_event
 from vigia_api.domain.operations import ZoneType
 from vigia_api.services.security import hash_password, hash_token
+from vigia_api.security.rate_limit import rate_limiter
 from vigia_api.settings import settings
 
 try:
@@ -25,9 +26,14 @@ class TenantIsolationHttpTest(unittest.TestCase):
     def setUp(self) -> None:
         if TestClient is None or create_app is None:
             self.skipTest("fastapi test client unavailable")
-        settings.login_rate_limit_attempts = 1000
-        settings.auth_rate_limit_attempts = 1000
-        settings.sensitive_rate_limit_attempts = 1000
+        # `settings` é singleton de módulo: sem restaurar, o resto da suíte herda limite
+        # 1000 e passa a rodar sem rate limit — um teste de "bloqueia após N tentativas"
+        # ficaria verde com o limitador desligado.
+        afrouxados = {"login_rate_limit_attempts": 1000, "auth_rate_limit_attempts": 1000, "sensitive_rate_limit_attempts": 1000}
+        for nome, valor in afrouxados.items():
+            self.addCleanup(setattr, settings, nome, getattr(settings, nome))
+            setattr(settings, nome, valor)
+        rate_limiter._windows.clear()
         self.container = build_container(repository_backend="memory", seed_dev=False)
         self.container.auth_service.repository.seed_demo_user()
         user = self.container.auth_service.repository.get_user_by_email("admin@vigia.local")

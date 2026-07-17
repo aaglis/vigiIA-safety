@@ -2,6 +2,7 @@ import unittest
 
 from vigia_api.container import build_container
 from vigia_api.domain.auth import MembershipSummary, OrganizationSummary, Permission, User
+from vigia_api.security.rate_limit import rate_limiter
 from vigia_api.settings import settings
 
 try:
@@ -18,6 +19,10 @@ ORIGIN_HEADERS = {"Origin": "http://localhost:3000", "Referer": "http://localhos
 
 class MembersHttpTest(unittest.TestCase):
     def setUp(self) -> None:
+        # O limitador é singleton de módulo: sem limpar, os logins dos testes anteriores
+        # (mesmo IP, mesmo admin@vigia.local) gastam as 5 tentativas/min e o login aqui
+        # volta 429. Passa isolado, quebra na suíte.
+        rate_limiter._windows.clear()
         if TestClient is None:
             self.skipTest("fastapi test client unavailable")
         assert create_app is not None
