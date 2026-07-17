@@ -7,11 +7,15 @@ import { cameraFormSchema, type CameraFormValues } from '../schemas'
 export function CameraForm({
   sites,
   defaultSiteId,
+  initial,
+  submitLabel = 'Criar câmera',
   onSubmit,
   onCancel,
 }: {
   sites: OperationSite[]
   defaultSiteId?: string
+  initial?: Partial<CameraFormValues>
+  submitLabel?: string
   onSubmit: (values: CameraFormValues) => Promise<void>
   onCancel: () => void
 }) {
@@ -21,7 +25,12 @@ export function CameraForm({
     formState: { errors, isSubmitting },
   } = useForm<CameraFormValues>({
     resolver: zodResolver(cameraFormSchema),
-    defaultValues: { site_id: defaultSiteId ?? sites[0]?.id ?? '', name: '', stream_identifier: '', status: 'active' },
+    defaultValues: {
+      site_id: initial?.site_id ?? defaultSiteId ?? sites[0]?.id ?? '',
+      name: initial?.name ?? '',
+      stream_identifier: initial?.stream_identifier ?? '',
+      status: initial?.status ?? 'active',
+    },
     mode: 'onBlur',
   })
 
@@ -52,7 +61,7 @@ export function CameraForm({
       </SelectField>
       <div className="flex flex-wrap items-center justify-end gap-2.5">
         <Button type="button" variant="secondary" onClick={onCancel}>Cancelar</Button>
-        <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Salvando…' : 'Criar câmera'}</Button>
+        <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Salvando…' : submitLabel}</Button>
       </div>
     </form>
   )

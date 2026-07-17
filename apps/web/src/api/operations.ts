@@ -31,6 +31,8 @@ export interface OperationZone {
   site_id: string
   camera_id: string
   zone_type: OperationZoneType
+  /** Nome dado pelo operador ("Porta da Doca"). Zonas antigas podem não ter. */
+  name?: string | null
   status: OperationEntityStatus
   polygon_json?: Metadata
 }
@@ -86,6 +88,7 @@ export interface CreateZoneInput {
   site_id: string
   camera_id: string
   zone_type: OperationZoneType
+  name?: string | null
   polygon_json?: Metadata
   status?: OperationEntityStatus
 }
@@ -119,11 +122,11 @@ export function updateOperationCamera(organizationId: string, cameraId: string, 
 }
 
 export function createOperationZone(organizationId: string, payload: CreateZoneInput) {
-  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, 'zones'), { method: 'POST', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
+  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, 'zones'), { method: 'POST', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, name: payload.name ?? null, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
 }
 
 export function updateOperationZone(organizationId: string, zoneId: string, payload: UpdateZoneInput) {
-  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, `zones/${zoneId}`), { method: 'PATCH', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
+  return apiFetch<{ zone: OperationZone }>(operationsPath(organizationId, `zones/${zoneId}`), { method: 'PATCH', body: JSON.stringify({ site_id: payload.site_id, camera_id: payload.camera_id, zone_type: payload.zone_type, name: payload.name ?? null, polygon_json: payload.polygon_json ?? {}, status: payload.status ?? 'active' }) })
 }
 
 export function listOperationSites(organizationId: string) {
@@ -155,4 +158,16 @@ export interface CameraLiveTicket {
 
 export function getCameraLiveTicket(organizationId: string, cameraId: string) {
   return apiFetch<CameraLiveTicket>(`${operationsPath(organizationId, 'cameras')}/${encodeURIComponent(cameraId)}/live`)
+}
+
+export function deleteOperationSite(organizationId: string, siteId: string) {
+  return apiFetch<void>(operationsPath(organizationId, `sites/${siteId}`), { method: 'DELETE' })
+}
+
+export function deleteOperationCamera(organizationId: string, cameraId: string) {
+  return apiFetch<void>(operationsPath(organizationId, `cameras/${cameraId}`), { method: 'DELETE' })
+}
+
+export function deleteOperationZone(organizationId: string, zoneId: string) {
+  return apiFetch<void>(operationsPath(organizationId, `zones/${zoneId}`), { method: 'DELETE' })
 }

@@ -4,10 +4,16 @@ import { Button } from '../../../components/ui/dashboard'
 import { Icon } from '../../../components/ui/icons'
 import type { EdgeWorker } from '../../../api/edgeWorkers'
 import type { OperationZone } from '../../../api/operations'
+import { isApiError } from '../../../api/client'
 import { useOperations, useOperationsLayout } from './OperationsContext'
 import { Panel, StatusDot, cameraSource, labelZoneType } from './shared'
 
 type DetailTab = 'cameras' | 'zones' | 'rules' | 'workers' | 'tests'
+
+function polygonPointsOf(zone: OperationZone): [number, number][] {
+  const points = (zone.polygon_json as { points?: [number, number][] } | undefined)?.points
+  return Array.isArray(points) ? points : []
+}
 
 
 /** Rota `/dashboard/operations/sites/$siteId`. */
@@ -27,8 +33,33 @@ export function SiteRoute() {
     ruleSeverityBadge,
     onOpenCamera,
     onBackToSites,
+    onDeleteZone,
   } = useOperations()
-  const { openDraft, lastEdgeWorker, openConfigCheck, openEdgeWorkerRegistration, canRegisterEdgeWorker } = useOperationsLayout()
+  const { openDraft, openEditSite, openEditCamera, openEditZone, lastEdgeWorker, openConfigCheck, openEdgeWorkerRegistration, canRegisterEdgeWorker } = useOperationsLayout()
+  const [zonaExcluindo, setZonaExcluindo] = useState<string | null>(null)
+  const [erroExclusao, setErroExclusao] = useState<{ zoneId: string; texto: string } | null>(null)
+
+  // Excluir zona com histórico é barrado pela API (409): o incidente aponta para o
+  // `zone_id` e a auditoria ficaria órfã. Traduz o motivo em vez de só falhar.
+  const excluirZona = async (zone: OperationZone) => {
+    const nome = zone.name || zone.id
+    if (!window.confirm(`Excluir a zona "${nome}"? A visão computacional deixa de avaliar essa área.`)) return
+    setErroExclusao(null)
+    setZonaExcluindo(zone.id)
+    try {
+      await onDeleteZone(zone.id)
+    } catch (error) {
+      const conflito = isApiError(error) && error.status === 409
+      setErroExclusao({
+        zoneId: zone.id,
+        texto: conflito
+          ? 'Esta zona já gerou incidentes e não pode ser excluída — o histórico deixaria de fazer sentido. Marque como inativa para parar de avaliar a área.'
+          : error instanceof Error ? error.message : 'Não foi possível excluir a zona.',
+      })
+    } finally {
+      setZonaExcluindo(null)
+    }
+  }
 
   const [activeTab, setActiveTab] = useState<DetailTab>('cameras')
   const [validationCameraId, setValidationCameraId] = useState<string>('')
@@ -117,7 +148,7 @@ export function SiteRoute() {
               </div>
               <p className="truncate text-[13px] text-[#5F5951]">{activeSite?.address ?? 'Escolha uma unidade para ver câmeras, zonas, regras e workers vinculados.'}</p>
             </div>
-            <button type="button" disabled title="Edição de unidade dedicada — em breve" className="h-[34px] flex-none rounded-[8px] border border-[#DCD7CC] bg-[var(--card)] px-3.5 text-[13px] font-medium text-[var(--ink)] opacity-50">
+            <button type="button" onClick={() => activeSite && openEditSite(activeSite)} data-testid="site-edit" className="h-[34px] flex-none rounded-[8px] border border-[#DCD7CC] bg-[var(--card)] px-3.5 text-[13px] font-medium text-[var(--ink)] transition hover:bg-white">
               Editar unidade
             </button>
           </div>
@@ -220,6 +251,14 @@ export function SiteRoute() {
                           </button>
                           <button
                             type="button"
+                            onClick={() => openEditCamera(camera)}
+                            data-testid={`camera-edit-${camera.id}`}
+                            className="text-[12px] font-medium text-[var(--muted)] hover:text-[var(--ink)] hover:underline"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => canTest && openTestForCamera(camera.id)}
                             disabled={!canTest}
                             className={`text-[12px] font-semibold ${canTest ? 'text-[#B14A22] hover:underline' : 'cursor-not-allowed text-[#C0BAB0]'}`}
@@ -256,14 +295,39 @@ export function SiteRoute() {
                     <div key={zone.id} className="rounded-[10px] border border-[#EDE9E1] bg-[var(--paper)] px-4 py-3.5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-[var(--ink)]">{zone.id}</p>
-                          <p className="mt-1 truncate text-xs text-[#8E887B]">Câmera: {camera?.name ?? zone.camera_id}</p>
+                          {/* Zona antiga pode não ter nome: cai no tipo, nunca no id cru. */}
+                          <p className="truncate text-sm font-semibold text-[var(--ink)]">{zone.name || typeBadge.label}</p>
+                          <p className="mt-1 truncate text-xs text-[#8E887B]">{camera?.name ?? zone.camera_id}</p>
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <span className="flex-none rounded-[5px] px-2 py-0.5 text-[10px] font-semibold tracking-[0.06em]" style={{ background: typeBadge.bg, color: typeBadge.color }}>{typeBadge.label}</span>
-                          <span className="flex-none rounded-[5px] px-2 py-0.5 text-[10px] font-semibold tracking-[0.06em]" style={{ background: statusBadge.bg, color: statusBadge.color }}>{statusBadge.label}</span>
+                        <span className="flex-none rounded-[5px] px-2 py-0.5 text-[10px] font-semibold tracking-[0.06em]" style={{ background: typeBadge.bg, color: typeBadge.color }}>{typeBadge.label}</span>
+                      </div>
+                      <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-[#F0EDE6] pt-2.5">
+                        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: statusBadge.color }}>
+                          <StatusDot color={statusBadge.color} /> {statusBadge.label}
+                        </span>
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-mono-ui text-[10px] text-[#A9A398]">
+                            {polygonPointsOf(zone).length >= 3 ? 'área desenhada' : 'quadro inteiro'}
+                          </span>
+                          <button type="button" onClick={() => openEditZone(zone)} data-testid={`zone-edit-${zone.id}`} className="text-[12px] font-medium text-[#B14A22] hover:underline">
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void excluirZona(zone)}
+                            disabled={zonaExcluindo === zone.id}
+                            data-testid={`zone-delete-${zone.id}`}
+                            className="text-[12px] font-medium text-[var(--muted-2)] hover:text-[#9e4120] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {zonaExcluindo === zone.id ? 'Excluindo…' : 'Excluir'}
+                          </button>
                         </div>
                       </div>
+                      {erroExclusao?.zoneId === zone.id ? (
+                        <p className="mt-2.5 rounded-[8px] border border-[rgba(193,85,43,0.2)] bg-[rgba(193,85,43,0.06)] px-3 py-2 text-[12px] leading-5 text-[#9e4120]">
+                          {erroExclusao.texto}
+                        </p>
+                      ) : null}
                     </div>
                   )
                 })}

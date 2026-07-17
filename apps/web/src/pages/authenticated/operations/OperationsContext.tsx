@@ -40,6 +40,12 @@ export type OperationsContextValue = {
   onCreateSite: (payload: { name: string; address?: string | null; status?: OperationEntityStatus }) => Promise<unknown>
   onCreateCamera: (payload: { site_id: string; name: string; stream_identifier: string; status?: OperationEntityStatus }) => Promise<unknown>
   onCreateZone: (payload: CreateZoneInput) => Promise<unknown>
+  onUpdateSite: (id: string, payload: { name: string; address?: string | null; status?: OperationEntityStatus }) => Promise<unknown>
+  onUpdateCamera: (id: string, payload: { site_id: string; name: string; stream_identifier: string; status?: OperationEntityStatus }) => Promise<unknown>
+  onUpdateZone: (id: string, payload: CreateZoneInput) => Promise<unknown>
+  /** Rejeita com ApiError 409 quando há histórico apontando para o cadastro. */
+  onDeleteZone: (id: string) => Promise<unknown>
+  onDeleteCamera: (id: string) => Promise<unknown>
   onLoadCameraFrame?: (cameraId: string) => Promise<string | null>
   onRequestLiveTicket?: (cameraId: string) => Promise<{ whep_url: string; token?: string } | null>
   onRegisterEdgeWorker: (payload: { site_id: string; name: string; allowed_camera_ids: string[] }) => Promise<RegisterEdgeWorkerResponse>
@@ -53,6 +59,9 @@ export type OperationsContextValue = {
 /** Ações do layout de Operações (cabeçalho + modais) que as rotas filhas disparam. */
 export type OperationsLayoutValue = {
   openDraft: (kind: 'site' | 'camera' | 'zone') => void
+  openEditSite: (site: OperationSite) => void
+  openEditCamera: (camera: OperationCamera) => void
+  openEditZone: (zone: OperationZone) => void
   lastEdgeWorker: EdgeWorker | null
   openEdgeWorkerRegistration: () => void
   openConfigCheck: () => void

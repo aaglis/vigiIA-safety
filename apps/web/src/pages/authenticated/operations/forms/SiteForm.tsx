@@ -3,14 +3,24 @@ import { useForm } from 'react-hook-form'
 import { Button, SelectField, TextField } from '../../../../components/ui/dashboard'
 import { siteFormSchema, type SiteFormValues } from '../schemas'
 
-export function SiteForm({ onSubmit, onCancel }: { onSubmit: (values: SiteFormValues) => Promise<void>; onCancel: () => void }) {
+export function SiteForm({
+  initial,
+  submitLabel = 'Criar unidade',
+  onSubmit,
+  onCancel,
+}: {
+  initial?: Partial<SiteFormValues>
+  submitLabel?: string
+  onSubmit: (values: SiteFormValues) => Promise<void>
+  onCancel: () => void
+}) {
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<SiteFormValues>({
     resolver: zodResolver(siteFormSchema),
-    defaultValues: { name: '', address: '', status: 'active' },
+    defaultValues: { name: initial?.name ?? '', address: initial?.address ?? '', status: initial?.status ?? 'active' },
     mode: 'onBlur',
   })
 
@@ -37,7 +47,7 @@ export function SiteForm({ onSubmit, onCancel }: { onSubmit: (values: SiteFormVa
       </SelectField>
       <div className="flex flex-wrap items-center justify-end gap-2.5">
         <Button type="button" variant="secondary" onClick={onCancel}>Cancelar</Button>
-        <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Salvando…' : 'Criar unidade'}</Button>
+        <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Salvando…' : submitLabel}</Button>
       </div>
     </form>
   )

@@ -40,6 +40,8 @@ export const cameraFormSchema = z.object({
 export const zoneFormSchema = z.object({
   site_id: z.string().min(1, 'Escolha a unidade.'),
   camera_id: z.string().min(1, 'Escolha a câmera desta zona.'),
+  // Sem nome, o operador vê o id cru ("zone-demo-01") no alerta e na lista.
+  name: z.string().trim().min(2, 'Dê um nome à área, como ela é conhecida na planta.').max(120, 'Nome muito longo.'),
   zone_type: z.enum(['restricted', 'ppe', 'access']),
   status,
   // O worker usa coordenadas normalizadas [0..1]; menos de 3 pontos não fecha uma área.

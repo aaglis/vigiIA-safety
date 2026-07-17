@@ -4,7 +4,7 @@ import { acknowledgeIncident, dismissIncident, getIncident, getIncidentAuditLog,
 import { getEvidenceDownloadUrl, listEvidence } from '../api/evidence'
 import { createInvite, listInvites, resendInvite, revokeInvite } from '../api/invites'
 import { deactivateMember, listMembers, updateMember } from '../api/members'
-import { createOperationCamera, createOperationSite, createOperationZone, getOperationsCatalog } from '../api/operations'
+import { createOperationCamera, createOperationSite, createOperationZone, deleteOperationCamera, deleteOperationSite, deleteOperationZone, getOperationsCatalog, updateOperationCamera, updateOperationSite, updateOperationZone } from '../api/operations'
 import { queryKeys } from '../api/queryKeys'
 
 export function useCurrentUser(enabled = true) { return useQuery({ queryKey: queryKeys.currentUser, queryFn: me, enabled, retry: false }) }
@@ -23,6 +23,12 @@ export function useOperationMutations(orgId: string | null) {
     createSite: useMutation({ mutationFn: (payload: Parameters<typeof createOperationSite>[1]) => createOperationSite(orgId!, payload), onSuccess: () => void invalidate() }),
     createCamera: useMutation({ mutationFn: (payload: Parameters<typeof createOperationCamera>[1]) => createOperationCamera(orgId!, payload), onSuccess: () => void invalidate() }),
     createZone: useMutation({ mutationFn: (payload: Parameters<typeof createOperationZone>[1]) => createOperationZone(orgId!, payload), onSuccess: () => void invalidate() }),
+    updateSite: useMutation({ mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateOperationSite>[2] }) => updateOperationSite(orgId!, id, payload), onSuccess: () => void invalidate() }),
+    updateCamera: useMutation({ mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateOperationCamera>[2] }) => updateOperationCamera(orgId!, id, payload), onSuccess: () => void invalidate() }),
+    updateZone: useMutation({ mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateOperationZone>[2] }) => updateOperationZone(orgId!, id, payload), onSuccess: () => void invalidate() }),
+    deleteSite: useMutation({ mutationFn: (id: string) => deleteOperationSite(orgId!, id), onSuccess: () => void invalidate() }),
+    deleteCamera: useMutation({ mutationFn: (id: string) => deleteOperationCamera(orgId!, id), onSuccess: () => void invalidate() }),
+    deleteZone: useMutation({ mutationFn: (id: string) => deleteOperationZone(orgId!, id), onSuccess: () => void invalidate() }),
   }
 }
 

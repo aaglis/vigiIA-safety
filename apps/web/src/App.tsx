@@ -911,6 +911,11 @@ export default function App() {
     onCreateSite: async (payload) => { await operationMutations.createSite.mutateAsync(payload); await reloadOperationsCatalog() },
     onCreateCamera: async (payload) => { await operationMutations.createCamera.mutateAsync(payload); await reloadOperationsCatalog() },
     onCreateZone: async (payload) => { await operationMutations.createZone.mutateAsync(payload); await reloadOperationsCatalog() },
+    onUpdateSite: async (id, payload) => { await operationMutations.updateSite.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
+    onUpdateCamera: async (id, payload) => { await operationMutations.updateCamera.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
+    onUpdateZone: async (id, payload) => { await operationMutations.updateZone.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
+    onDeleteZone: async (id) => { await operationMutations.deleteZone.mutateAsync(id); await reloadOperationsCatalog() },
+    onDeleteCamera: async (id) => { await operationMutations.deleteCamera.mutateAsync(id); await reloadOperationsCatalog() },
     onLoadCameraFrame: loadCameraFrame,
     onRequestLiveTicket: requestLiveTicket,
     onRegisterEdgeWorker: async (payload) => {
