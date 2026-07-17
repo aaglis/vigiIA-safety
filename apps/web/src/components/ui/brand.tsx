@@ -1,5 +1,7 @@
+import type { ReactNode, InputHTMLAttributes, SelectHTMLAttributes } from 'react'
 import type { IncidentStatus } from '../../api/incidents'
 import type { OperationEntityStatus, OperationZoneType } from '../../api/operations'
+export { AsyncPaginatedSelect, Button, DataCard, EmptyState, ErrorState, PagePanel, PageState, StatusBadge, SeverityBadge } from './dashboard'
 
 export function MonogramMark({ className = '', variant = 'default' }: { className?: string; variant?: 'default' | 'reverse' }) {
   const outline = variant === 'reverse' ? '#F5F3EF' : '#201B18'
@@ -72,4 +74,96 @@ export function ZoneTypePill({ zoneType }: { zoneType: OperationZoneType }) {
   }
   const labels: Record<OperationZoneType, string> = { access: 'Acesso', restricted: 'Restrita', ppe: 'EPI' }
   return <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] ${styles[zoneType]}`}>{labels[zoneType]}</span>
+}
+
+export function Modal({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  open: boolean
+  title: string
+  description?: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,27,24,0.42)] px-4 py-4 backdrop-blur-sm sm:items-center">
+      <button type="button" aria-label="Fechar modal" onClick={onClose} className="absolute inset-0 cursor-default" />
+      {/* max-h + flex-col: o modal nunca passa da viewport. O cabeçalho fica parado e só
+          o corpo rola — sem isto, conteúdo longo empurra os botões para fora da tela. */}
+      <div role="dialog" aria-modal="true" aria-label={title} className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-[rgba(245,243,239,0.98)] shadow-[0_30px_90px_rgba(32,27,24,0.22)]">
+        <div className="flex flex-none items-start justify-between gap-4 border-b border-[color:var(--line)] px-6 py-5">
+          <div>
+            <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">{title}</p>
+            {description ? <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--muted)]">{description}</p> : null}
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-[color:var(--line)] bg-[var(--paper)] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)] transition hover:bg-white">Fechar</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+export function TextField({ label, helperText, errorText, className = '', ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; helperText?: string; errorText?: string }) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-[13px] font-medium text-[#403933]">{label}</span>
+      <input
+        {...props}
+        className={`h-12 w-full rounded-[10px] border border-[#dcd7cc] bg-[var(--card)] px-3.5 text-[15px] text-[var(--ink)] outline-none transition placeholder:text-[#a09a8e] focus:border-[var(--accent)] focus:ring-2 focus:ring-[rgba(193,85,43,0.16)] disabled:cursor-not-allowed disabled:opacity-60 ${errorText ? 'border-[rgba(193,85,43,0.35)] focus:border-[rgba(193,85,43,0.8)] focus:ring-[rgba(193,85,43,0.18)]' : ''} ${className}`}
+      />
+      {errorText ? <p className="text-[12px] leading-5 text-[#9e4120]">{errorText}</p> : helperText ? <p className="text-[12px] leading-5 text-[var(--label)]">{helperText}</p> : null}
+    </label>
+  )
+}
+
+export function SelectField({ label, helperText, errorText, className = '', children, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { label: string; helperText?: string; errorText?: string; children: ReactNode }) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-[13px] font-medium text-[#403933]">{label}</span>
+      <select
+        {...props}
+        className={`h-12 w-full rounded-[10px] border border-[#dcd7cc] bg-[var(--card)] px-3.5 text-[15px] text-[var(--ink)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[rgba(193,85,43,0.16)] disabled:cursor-not-allowed disabled:opacity-60 ${errorText ? 'border-[rgba(193,85,43,0.35)] focus:border-[rgba(193,85,43,0.8)] focus:ring-[rgba(193,85,43,0.18)]' : ''} ${className}`}
+      >
+        {children}
+      </select>
+      {errorText ? <p className="text-[12px] leading-5 text-[#9e4120]">{errorText}</p> : helperText ? <p className="text-[12px] leading-5 text-[var(--label)]">{helperText}</p> : null}
+    </label>
+  )
+}
+
+export function FormActions({
+  primaryLabel,
+  secondaryLabel,
+  onPrimary,
+  onSecondary,
+  primaryDisabled,
+  primaryHint,
+}: {
+  primaryLabel: string
+  secondaryLabel: string
+  onPrimary?: () => void
+  onSecondary: () => void
+  primaryDisabled?: boolean
+  primaryHint?: string
+}) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs leading-5 text-[var(--label)]">{primaryHint ?? 'Esta ação ainda depende da API de escrita.'}</p>
+      <div className="flex flex-wrap gap-3">
+        <button type="button" onClick={onSecondary} className="rounded-[9px] border border-[color:var(--line)] bg-[var(--paper)] px-5 py-3 text-sm font-medium text-[var(--ink)] transition hover:bg-white">
+          {secondaryLabel}
+        </button>
+        <button type="button" onClick={onPrimary} disabled={primaryDisabled ?? true} className="rounded-[9px] bg-[var(--accent)] px-5 py-3 text-sm font-medium text-[var(--paper)] transition disabled:cursor-not-allowed disabled:opacity-60">
+          {primaryLabel}
+        </button>
+      </div>
+    </div>
+  )
 }
