@@ -1,41 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+from urllib.parse import urlsplit
 
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import APIRouter, Depends, HTTPException, Request
-except Exception:  # pragma: no cover
-    if TYPE_CHECKING:
-        from fastapi import APIRouter, Depends, HTTPException, Request
-    else:
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
-
-        class Depends:  # type: ignore[no-redef]
-            def __init__(self, dependency: Any):
-                self.dependency = dependency
-
-        class Request:  # type: ignore[no-redef]
-            pass
-
-        class APIRouter:  # type: ignore[no-redef]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def get(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...container import default_container
 from ...domain.auth import Permission
-from ...domain.operations import EntityStatus, OperationInUse, ZoneType, validate_stream_identifier
+from ...domain.operations import EntityStatus, OperationInUse, ZoneType, classify_stream_source, validate_stream_identifier
 from ...settings import settings
 from ...security.csrf import require_csrf
 from ...security.origin import validate_origin_or_referer
@@ -73,6 +47,18 @@ class CameraIn(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CameraUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str
+    name: str
+    # Edição pelo navegador NÃO recebe a URL atual de volta. Ausente/null/"" mantém o
+    # segredo já salvo; valor preenchido troca o stream e revalida por ambiente.
+    stream_identifier: str | None = None
+    status: EntityStatus = EntityStatus.ACTIVE
+    metadata: dict[str, Any] | None = None
+
+
 class ZoneIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,8 +75,34 @@ def _serialize_site_entity(site) -> dict[str, Any]:
     return {"id": site.id, "organization_id": site.organization_id, "name": site.name, "address": site.address, "status": site.status.value}
 
 
+def _display_stream_identifier(stream_identifier: str) -> str:
+    """Valor seguro para o navegador: nunca inclui usuário, senha, host ou path.
+
+    `stream_identifier` é segredo operacional (ex.: rtsp://user:pass@host/path). O edge
+    worker recebe o valor bruto em `/edge-workers/me/config`, mas endpoints de Operações
+    são consumidos por usuários humanos e só mostram o tipo da fonte.
+    """
+    source_type = classify_stream_source(stream_identifier) or urlsplit(stream_identifier).scheme.lower() or "stream"
+    labels = {"rtsp": "RTSP configurado", "rtmp": "RTMP configurado", "http": "HTTP configurado", "video": "Vídeo de teste configurado"}
+    label = labels.get(source_type, "Fonte configurada")
+    parsed = urlsplit(stream_identifier)
+    if parsed.username or parsed.password:
+        return f"{label} · credenciais ocultas"
+    return label
+
+
 def _serialize_camera_entity(camera) -> dict[str, Any]:
-    return {"id": camera.id, "organization_id": camera.organization_id, "site_id": camera.site_id, "name": camera.name, "stream_identifier": camera.stream_identifier, "status": camera.status.value, "metadata": camera.metadata}
+    source_type = str((camera.metadata or {}).get("source_type") or classify_stream_source(camera.stream_identifier) or "stream")
+    return {
+        "id": camera.id,
+        "organization_id": camera.organization_id,
+        "site_id": camera.site_id,
+        "name": camera.name,
+        "display_stream_identifier": _display_stream_identifier(camera.stream_identifier),
+        "stream_source_type": source_type,
+        "status": camera.status.value,
+        "metadata": camera.metadata,
+    }
 
 
 def _camera_metadata_with_source(stream_identifier: str, metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -211,12 +223,13 @@ def create_camera(organization_id: str, payload: CameraIn, request: Request, mem
 
 
 @router.patch("/organizations/{organization_id}/operations/cameras/{camera_id}", dependencies=[Depends(require_permission("cameras.manage")), Depends(require_csrf)])
-def update_camera(organization_id: str, camera_id: str, payload: CameraIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
+def update_camera(organization_id: str, camera_id: str, payload: CameraUpdateIn, request: Request, membership=Depends(get_current_organization_membership)) -> dict:
     validate_origin_or_referer(request)
     _assert_organization_access(organization_id, membership)
-    metadata = _camera_metadata_with_source(payload.stream_identifier, payload.metadata)
+    stream_identifier = payload.stream_identifier.strip() if payload.stream_identifier else None
+    metadata = _camera_metadata_with_source(stream_identifier, payload.metadata) if stream_identifier is not None else payload.metadata
     try:
-        return {"camera": _serialize_camera_entity(_service(request).update_camera(organization_id, camera_id, payload.site_id, payload.name, payload.stream_identifier, payload.status, metadata))}
+        return {"camera": _serialize_camera_entity(_service(request).update_camera(organization_id, camera_id, payload.site_id, payload.name, stream_identifier, payload.status, metadata))}
     except KeyError as exc:
         raise HTTPException(status_code=_key_error_status(exc), detail=str(exc)) from exc
     except ValueError as exc:

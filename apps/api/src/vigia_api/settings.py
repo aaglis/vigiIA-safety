@@ -86,10 +86,17 @@ class Settings(BaseSettings):
     notification_from: str = "alerts@vigia.local"
     live_stream_public_base_url: str = "http://localhost:8889"
     live_stream_ticket_ttl_seconds: int = 60
+    frame_analysis_config_cache_seconds: float = 2.0
     incident_notification_enabled: bool = True
     incident_notification_mode: str = "mock"  # mock|resend
     incident_notification_recipients: list[str] = ["ops@vigia.local"]
     incident_notification_severity_threshold: str = "high"
+    scheduler_notifications_interval_seconds: int = 30
+    scheduler_offline_workers_interval_seconds: int = 60
+    scheduler_evidence_retention_interval_seconds: int = 86400
+    scheduler_evidence_retention_confirm: bool = False
+    scheduler_lock_ttl_seconds: int = 120
+    scheduler_organization_ids: list[str] = []
     edge_worker_api_key: str = "dev-only"
     edge_worker_client_id: str = "dev-client-id"
     metrics_token: str = ""

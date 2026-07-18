@@ -43,6 +43,14 @@ class InMemoryEvidenceMetadataRepository:
     def get(self, organization_id: str, incident_id: str, file_id: str) -> dict[str, object] | None:
         return self.rows.get((organization_id, incident_id, file_id))
 
+    def list_by_organization(self, organization_id: str):
+        items = [row for row in self.rows.values() if row["organization_id"] == organization_id]
+        return sorted(items, key=lambda row: (row["created_at"], row["file_id"]), reverse=True)
+
+    def list_by_incident(self, organization_id: str, incident_id: str):
+        items = [row for row in self.rows.values() if row["organization_id"] == organization_id and row["incident_id"] == incident_id]
+        return sorted(items, key=lambda row: (row["created_at"], row["file_id"]), reverse=True)
+
 
 class EvidenceService:
     def __init__(self, storage: EvidenceStorage | None = None, metadata_repository: object | None = None, settings_obj: object | None = None) -> None:
@@ -80,6 +88,24 @@ class EvidenceService:
                 metadata=dict(cast(dict, row["metadata_json"])),
             )
         return None
+
+    def _coerce_evidence(self, item: IncidentEvidence | dict[str, object]) -> IncidentEvidence:
+        if isinstance(item, IncidentEvidence):
+            return item
+        return IncidentEvidence(
+            organization_id=str(item["organization_id"]),
+            incident_id=str(item["incident_id"]),
+            file_id=str(item["file_id"]),
+            object_key=str(item["object_key"]),
+            media_type=str(item["media_type"]),
+            size=int(cast(int | str, item["size"])),
+            source=EvidenceSource(str(item["source"])),
+            uploaded_by=str(item["uploaded_by"]),
+            kind=EvidenceKind(str(item["kind"])),
+            created_at=cast(datetime, item["created_at"]),
+            deleted_at=cast(datetime | None, item["deleted_at"]),
+            metadata=dict(cast(dict, item["metadata_json"])),
+        )
 
     def _object_key(self, organization_id: str, incident_id: str, file_id: str) -> str:
         return f"org/{organization_id}/incidents/{incident_id}/evidence/{file_id}"
@@ -165,8 +191,11 @@ class EvidenceService:
         items = list(self.repository.evidence.items())
         list_by_org = getattr(self.metadata_repository, "list_by_organization", None)
         if callable(list_by_org):
-            org_items = cast(list[IncidentEvidence], list_by_org(organization_id))
-            items = [((e.organization_id, e.incident_id, e.file_id), e) for e in org_items]
+            org_items = [self._coerce_evidence(item) for item in cast(list[IncidentEvidence | dict[str, object]], list_by_org(organization_id))]
+            merged: dict[tuple[str, str, str], IncidentEvidence] = {key: value for key, value in items if key[0] == organization_id}
+            for evidence in org_items:
+                merged[(evidence.organization_id, evidence.incident_id, evidence.file_id)] = self.repository.evidence.get((evidence.organization_id, evidence.incident_id, evidence.file_id), evidence)
+            items = list(merged.items())
         for (org_id, incident_id, file_id), evidence in items:
             if org_id != organization_id or evidence.deleted_at is not None:
                 continue
@@ -179,11 +208,24 @@ class EvidenceService:
         return preview
 
     def list_evidence(self, organization_id: str, incident_id: str | None = None, limit: int | None = 50, offset: int = 0) -> list[IncidentEvidence]:
+        list_paginated = getattr(self.metadata_repository, "list_paginated", None)
+        if callable(list_paginated):
+            return [self._coerce_evidence(item) for item in cast(list[IncidentEvidence | dict[str, object]], list_paginated(organization_id, incident_id=incident_id, limit=limit, offset=offset))]
         items = list(self.repository.evidence.values())
         if hasattr(self.metadata_repository, "list_by_organization"):
-            items = list(getattr(self.metadata_repository, "list_by_organization")(organization_id))
+            items = [self._coerce_evidence(item) for item in getattr(self.metadata_repository, "list_by_organization")(organization_id)]
         items = [item for item in items if item.organization_id == organization_id and (incident_id is None or item.incident_id == incident_id)]
+        items = sorted(items, key=lambda item: (item.created_at, item.file_id), reverse=True)
         return items[offset:] if limit is None else items[offset: offset + limit]
+
+    def count_evidence(self, organization_id: str, incident_id: str | None = None) -> int:
+        count = getattr(self.metadata_repository, "count_by_organization", None)
+        if callable(count):
+            return int(cast(int, count(organization_id, incident_id=incident_id)))
+        items = list(self.repository.evidence.values())
+        if hasattr(self.metadata_repository, "list_by_organization"):
+            items = [self._coerce_evidence(item) for item in getattr(self.metadata_repository, "list_by_organization")(organization_id)]
+        return len([item for item in items if item.organization_id == organization_id and (incident_id is None or item.incident_id == incident_id)])
 
     def list_audit_logs(self, organization_id: str, incident_id: str | None = None, file_id: str | None = None, action: str | None = None, limit: int | None = 50, offset: int = 0) -> list[EvidenceAccessAuditLog]:
         logs = list(self.repository.audit_logs)
@@ -193,7 +235,7 @@ class EvidenceService:
         if hasattr(self.metadata_repository, "audit_logs"):
             if incident_id is not None:
                 logs = list(getattr(self.metadata_repository, "audit_logs")(organization_id, incident_id))
-        logs = [log for log in logs if log.organization_id == organization_id and (incident_id is None or log.incident_id == incident_id) and (file_id is None or log.file_id == file_id) and (action is None or log.action == action)]
+        logs = sorted([log for log in logs if log.organization_id == organization_id and (incident_id is None or log.incident_id == incident_id) and (file_id is None or log.file_id == file_id) and (action is None or log.action == action)], key=lambda log: (log.created_at, log.id), reverse=False)
         return logs[offset:] if limit is None else logs[offset: offset + limit]
 
     def purge_expired_evidence(self, organization_id: str, confirm: bool = False, actor_user_id: str | None = None, reason: str | None = None, now: datetime | None = None) -> dict[str, object]:

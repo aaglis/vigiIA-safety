@@ -42,9 +42,16 @@ class EdgeWorkersPersistenceTest(unittest.TestCase):
         worker_payload = cast(dict[str, object], cfg["worker"])
         self.assertEqual(worker_payload["organization_id"], "org-1")
 
-        reloaded.heartbeat(worker.client_id, api_key)
+        telemetry = {"cv_mode": "real", "pending_queue": 2, "inactive_rules": ["ppe_violation:modelo-sem-classe-de-capacete"]}
+        reloaded.heartbeat(worker.client_id, api_key, telemetry=telemetry)
         row = reloaded.repository.get(worker.id)
         self.assertIsNotNone(row.last_heartbeat_at)
+        self.assertEqual(row.last_telemetry, telemetry)
+
+        telemetry_reloaded = self._service()
+        persisted_telemetry = telemetry_reloaded.repository.get(worker.id)
+        self.assertIsNotNone(persisted_telemetry)
+        self.assertEqual(persisted_telemetry.last_telemetry, telemetry)
 
         later = datetime.now(timezone.utc) + timedelta(seconds=3600)
         self.assertTrue(reloaded.is_offline(worker.id, threshold_seconds=60, now=later))

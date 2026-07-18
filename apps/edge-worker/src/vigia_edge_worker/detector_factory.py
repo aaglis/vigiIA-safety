@@ -13,7 +13,7 @@ class DetectorSelection:
     cv_mode: str = "mock"
     cv_real_enabled: bool = False
     cv_real_marker: str | None = None
-    cv_real_model_version: str = "real-cv-0"
+    cv_real_model_version: str = "ppe-multiclass-1"
 
 
 def build_detector(config: WorkerConfig, selection: DetectorSelection | None = None) -> Detector:

@@ -15,12 +15,29 @@
     "status": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state"],
+      "required": ["state", "processed_frames", "emitted_events"],
       "properties": {
         "state": { "type": "string", "enum": ["ok", "degraded", "offline"] },
         "cpu_percent": { "type": "number", "minimum": 0, "maximum": 100 },
         "memory_percent": { "type": "number", "minimum": 0, "maximum": 100 },
-        "queue_depth": { "type": "integer", "minimum": 0 }
+        "queue_depth": { "type": "integer", "minimum": 0 },
+        "processed_frames": { "type": "integer", "minimum": 0 },
+        "emitted_events": { "type": "integer", "minimum": 0 },
+        "buffered_events": { "type": "integer", "minimum": 0 },
+        "api_errors": { "type": "integer", "minimum": 0 },
+        "source_errors": { "type": "integer", "minimum": 0 },
+        "avg_inference_latency_ms": { "type": "number", "minimum": 0 },
+        "avg_send_latency_ms": { "type": "number", "minimum": 0 },
+        "cv_mode": { "type": "string", "minLength": 1 },
+        "source_type": { "type": "string", "minLength": 1 },
+        "worker_version": { "type": "string", "minLength": 1 },
+        "last_error": { "type": "string" },
+        "last_result": { "type": "string" },
+        "pending_queue": { "type": "integer", "minimum": 0 },
+        "inactive_rules": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     }
   }

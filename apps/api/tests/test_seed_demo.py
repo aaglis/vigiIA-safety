@@ -31,6 +31,8 @@ class SeedDemoTest(unittest.TestCase):
         self.assertIn("site-demo", operations_repository.sites)
         self.assertIn("camera-demo-01", operations_repository.cameras)
         self.assertIn("zone-demo-01", operations_repository.zones)
+        self.assertEqual(operations_repository.zones["zone-demo-01"].polygon_json["points"], [[0.23, 0.63], [0.68, 0.61], [0.78, 0.97], [0.18, 0.97]])
+        self.assertEqual(operations_repository.zones["zone-demo-01-ppe"].polygon_json["points"], [[0.08, 0.58], [0.92, 0.57], [0.86, 0.96], [0.14, 0.96]])
         self.assertIn("worker-demo-01", operations_repository.workers)
         self.assertIn("site-demo-patio-sul", operations_repository.sites)
         self.assertIn("site-demo-doca-norte", operations_repository.sites)

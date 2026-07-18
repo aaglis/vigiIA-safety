@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .geometry import bbox_base_center, horizontal_overlap, parse_polygon, point_in_polygon
+from .geometry import bbox_base_center, bbox_base_center_visible, horizontal_overlap, parse_polygon, point_in_polygon
 
 # Categorias normalizadas que o detector produz a partir das classes do modelo.
 CATEGORY_PERSON = "person"
@@ -40,6 +40,8 @@ class Violation:
 
 
 def _in_zone(bbox: BBox, polygon) -> bool:
+    if not bbox_base_center_visible(bbox):
+        return False
     if polygon is None:
         return True  # zona sem geometria vale para o frame inteiro
     cx, cy = bbox_base_center(bbox)
@@ -56,6 +58,25 @@ def _has_helmet_on(person: DetectedBox, helmets: list[DetectedBox]) -> bool:
         if head_center_y <= head_bottom and horizontal_overlap(person.bbox, helmet.bbox) > 0.2:
             return True
     return False
+
+
+def _person_for_head(head: DetectedBox, persons: list[DetectedBox]) -> DetectedBox | None:
+    """Associa uma detecção de cabeça à pessoa mais provável.
+
+    A cabeça sem capacete informa o EPI; a zona continua sendo decidida pelos pés/base
+    da pessoa. Sem pessoa associada, não inferimos pertencimento à zona de chão.
+    """
+    hx1, hy1, hx2, hy2 = head.bbox
+    head_center_y = (hy1 + hy2) / 2.0
+    candidates: list[DetectedBox] = []
+    for person in persons:
+        x1, y1, x2, y2 = person.bbox
+        head_bottom = y1 + (y2 - y1) * 0.45
+        if head_center_y <= head_bottom and horizontal_overlap(person.bbox, head.bbox) > 0.2:
+            candidates.append(person)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: horizontal_overlap(p.bbox, head.bbox))
 
 
 def _ppe_requires_helmet(required_ppe: list[dict[str, Any]]) -> bool:
@@ -108,9 +129,10 @@ def evaluate_violations(
         if head_class_available:
             # Modelo tem classe direta de cabeça-sem-capacete.
             for head in bare_heads:
-                if _in_zone(head.bbox, polygon):
+                person = _person_for_head(head, persons)
+                if person is not None and _in_zone(person.bbox, polygon):
                     violations.append(
-                        Violation("ppe_violation", str(zone.get("id")), head.confidence, CATEGORY_NO_HELMET, head.bbox, {"ppe_item": "capacete"})
+                        Violation("ppe_violation", str(zone.get("id")), head.confidence, CATEGORY_NO_HELMET, person.bbox, {"ppe_item": "capacete", "head_bbox": head.bbox})
                     )
         else:
             # Modelo tem person + helmet: associa geometricamente.

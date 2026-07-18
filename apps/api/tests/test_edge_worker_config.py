@@ -10,7 +10,8 @@ class EdgeWorkerConfigTest(unittest.TestCase):
         container = build_container(repository_backend="memory", seed_dev=False)
         repo = container.operations_repository
         site = repo.create_site("org-1", "HQ", site_id="site-1")
-        camera = repo.create_camera("org-1", site.id, "Cam 1", "stream-1", camera_id="cam-1")
+        raw_stream = "rtsp://camera-user:camera-pass@10.7.0.15:554/live"
+        camera = repo.create_camera("org-1", site.id, "Cam 1", raw_stream, camera_id="cam-1")
         zone = repo.create_zone("org-1", site.id, camera.id, ZoneType.RESTRICTED, {"points": []}, zone_id="zone-1")
         rule = repo.create_safety_rule("org-1", "Helmet required", site_id=site.id, zone_id=zone.id, rule_id="rule-1")
         repo.create_required_ppe("org-1", rule.id, "helmet", site_id=site.id, zone_id=zone.id, ppe_id="ppe-1")
@@ -19,8 +20,10 @@ class EdgeWorkerConfigTest(unittest.TestCase):
         zones = cast(list[dict[str, object]], payload["zones"])
         rules = cast(list[dict[str, object]], payload["safety_rules"])
         ppes = cast(list[dict[str, object]], payload["required_ppe"])
+        cameras = cast(list[dict[str, object]], payload["cameras"])
         self.assertEqual(payload["site_id"], site.id)
         self.assertEqual(payload["allowed_camera_ids"], [camera.id])
+        self.assertEqual(cameras[0]["stream_identifier"], raw_stream)
         self.assertEqual(zones[0]["zone_type"], "restricted")
         self.assertEqual(rules[0]["name"], "Helmet required")
         self.assertEqual(ppes[0]["item"], "helmet")

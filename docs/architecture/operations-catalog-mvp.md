@@ -21,6 +21,16 @@ Todas as entidades carregam `organization_id`; relações entre site, câmera, z
 - Regras e EPIs são suficientes para seed/demo e validação de incidentes; motor avançado de regras fica para etapa futura.
 - O seed local cria `site-demo`, `camera-demo-01`, `zone-demo-01`, `worker-demo-01` e regra/PPE mínimos de forma idempotente.
 
+## Semântica de zonas e geometria
+
+- Polígonos de `zones` são **coordenadas 2D da imagem**; eles não representam volume 3D.
+- A zona deve ser desenhada sobre a área do chão/solo visível no frame.
+- A avaliação de pertencimento usa o **centro da base do bbox** (pés/base), não o centro geométrico do corpo.
+- Se os pés/base estão cortados ou fora do frame, o sistema **não deve inferir** que a pessoa está dentro da zona.
+- Retângulos de porta, parede ou fachada podem ser ambíguos em vídeo; prefira áreas do piso claramente visíveis.
+- Falhas conhecidas: pés ocluídos por objeto/pessoa, pés recortados pela borda inferior do frame.
+- Mitigações futuras: homografia/calibração da câmera, keypoints de pose, melhor posicionamento da câmera e zonas mais alinhadas ao plano do chão.
+
 ## Runtime
 
 - `REPOSITORY_BACKEND=memory`: usa repositório in-memory para testes rápidos.

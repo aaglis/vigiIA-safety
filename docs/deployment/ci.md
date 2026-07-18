@@ -1,11 +1,14 @@
 # CI e gates de qualidade
 
 ## Gates obrigatórios
-- `bash scripts/validate.sh` — documentação base, JSON, compile da API e testes `unittest` de API/edge-worker.
+- `bash scripts/validate.sh` — documentação base, JSON, compile da API, testes `unittest` de API/edge-worker e gate local do frontend (`apps/web` typecheck + build quando `npm` e `node_modules` existem).
 - `bash scripts/check-secrets.sh` — varredura simples para segredos reais fora da allowlist de exemplos/dev-only.
 - `bash scripts/ci-smoke.sh` — valida Compose, build mínimo, `alembic upgrade head`, seed e smoke HTTP da API/edge-worker.
 - `bash scripts/pilot-smoke.sh` — smoke local mais completo: API, Web, seed, incidente, evidência e dashboard, em projeto Compose isolado.
-- `npm --workspace apps/web run test:e2e` — E2E browser do dashboard com Playwright e API mockada, cobrindo login, incidente, evidência sob demanda e ação de triagem.
+- `npm --workspace apps/web run test:unit` — unit tests do frontend com Vitest + jsdom + RTL.
+- `npm --workspace apps/web run typecheck` / `npm --workspace apps/web run build` — validação e build do frontend.
+- `npm --workspace apps/web run test:e2e:smoke` — smoke browser mínimo do dashboard com Playwright e API mockada (`pilot-smoke.spec.ts`), sem depender de backend ou Docker.
+- `npm --workspace apps/web run test:e2e` — E2E browser completo do dashboard com Playwright e API mockada, cobrindo login, incidente, evidência sob demanda e ação de triagem.
 - `PYTHONPATH=apps/api/src python3 -m vigia_api.scripts.seed_synthetic_incidents --count 1000` — baseline local de volume sintético para filtros do dashboard.
 - `bash scripts/backup-restore-smoke.sh` — smoke isolado de backup/restore local para PostgreSQL e MinIO quando a máquina tiver Docker disponível.
 
@@ -15,13 +18,17 @@ bash scripts/validate.sh
 bash scripts/check-secrets.sh
 bash scripts/ci-smoke.sh
 bash scripts/pilot-smoke.sh
+npm --workspace apps/web run typecheck
+npm --workspace apps/web run build
+npm --workspace apps/web run test:unit
+npm --workspace apps/web run test:e2e:smoke
 npm --workspace apps/web run test:e2e
 PYTHONPATH=apps/api/src python3 -m vigia_api.scripts.seed_synthetic_incidents --count 1000
 ```
 
 O smoke usa `COMPOSE_PROJECT_NAME=vigia_ci_smoke` por padrão, publica portas isoladas (`API_HOST_PORT=28000`, `POSTGRES_HOST_PORT=25432`, `REDIS_HOST_PORT=26379`, `MINIO_HOST_PORT=29000`) e remove os volumes desse projeto ao finalizar.
 
-Para a primeira execução do E2E browser em uma máquina nova, instale o navegador de teste com `npx playwright install chromium`. O teste usa mocks e não exige segredos reais nem stack Docker.
+Para a primeira execução do E2E browser em uma máquina nova, instale o navegador de teste com `npx playwright install chromium`. O smoke usa mocks e não exige segredos reais nem stack Docker.
 
 ## Checks pesados vs rápidos
 - Rápidos: `validate.sh` e `check-secrets.sh`.

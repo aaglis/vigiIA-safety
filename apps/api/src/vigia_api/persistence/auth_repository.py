@@ -4,12 +4,9 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-try:
-    from sqlalchemy import select
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
+from sqlalchemy import select
 
-from ..domain.auth import MembershipSummary, OrganizationSummary, Permission, PlatformRole, User, UserSession
+from ..domain.auth import MembershipSummary, OrganizationSummary, PlatformRole, User, UserSession
 from ..security.permissions import role_permissions
 from ..services.security import hash_password
 from ..settings import settings
@@ -31,16 +28,16 @@ class SqlAlchemyAuthRepository:
         if settings.app_env.lower() not in {"dev", "demo", "local"}:
             return
         with self.session_factory() as session:
-            org = session.execute(select(OrganizationRow).where(OrganizationRow.id == "org-demo")).scalar_one_or_none() if select is not None else None
+            org = session.execute(select(OrganizationRow).where(OrganizationRow.id == "org-demo")).scalar_one_or_none()
             if org is None:
                 org = OrganizationRow(id="org-demo", name="VigIA Local", legal_name="VigIA Local Demo", tax_id="DEMO-ORG-001", status="active", retention_days=365, created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
                 session.add(org)
-            user = session.execute(select(UserRow).where(UserRow.email_normalized == "admin@vigia.local")).scalar_one_or_none() if select is not None else None
+            user = session.execute(select(UserRow).where(UserRow.email_normalized == "admin@vigia.local")).scalar_one_or_none()
             if user is None:
                 user = UserRow(id="user-dev", email="admin@vigia.local", email_normalized="admin@vigia.local", full_name="VigIA Admin", password_hash=hash_password("change-me-dev"), platform_role=PlatformRole.NONE.value, is_active=True, email_verified_at=datetime.now(timezone.utc), created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
                 session.add(user)
                 session.flush()
-            membership = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == "org-demo", OrganizationMembershipRow.user_id == user.id)).scalar_one_or_none() if select is not None else None
+            membership = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == "org-demo", OrganizationMembershipRow.user_id == user.id)).scalar_one_or_none()
             if membership is None:
                 session.add(OrganizationMembershipRow(id="membership-demo-owner", organization_id="org-demo", user_id=user.id, role="org_owner", status="active", invited_by=None, joined_at=datetime.now(timezone.utc), created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc)))
             session.commit()
@@ -51,15 +48,11 @@ class SqlAlchemyAuthRepository:
             session.commit()
 
     def get_user_by_email(self, email: str) -> User | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             row = session.execute(select(UserRow).where(UserRow.email_normalized == email.lower())).scalar_one_or_none()
             return self._to_user(row)
 
     def get_user_by_id(self, user_id: str) -> User | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             return self._to_user(session.get(UserRow, user_id))
 
@@ -77,8 +70,6 @@ class SqlAlchemyAuthRepository:
 
     def revoke_sessions_for_user(self, user_id: str) -> None:
         with self.session_factory() as session:
-            if select is None:
-                return
             for row in session.execute(select(UserSessionRow).where(UserSessionRow.user_id == user_id, UserSessionRow.revoked_at.is_(None))).scalars().all():
                 row.revoked_at = datetime.now(timezone.utc)
             session.commit()
@@ -96,14 +87,10 @@ class SqlAlchemyAuthRepository:
             session.commit()
 
     def get_session(self, session_id: str) -> UserSession | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             return self._to_session(session.get(UserSessionRow, session_id))
 
     def get_session_by_refresh_token_hash(self, token_hash: str) -> UserSession | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             return self._to_session(session.execute(select(UserSessionRow).where(UserSessionRow.refresh_token_hash == token_hash)).scalar_one_or_none())
 
@@ -116,7 +103,7 @@ class SqlAlchemyAuthRepository:
         """Vincula usuário à organização. Idempotente: se já existe, atualiza o papel e reativa."""
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
-            existing = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == organization_id, OrganizationMembershipRow.user_id == user_id)).scalars().first() if select is not None else None
+            existing = session.execute(select(OrganizationMembershipRow).where(OrganizationMembershipRow.organization_id == organization_id, OrganizationMembershipRow.user_id == user_id)).scalars().first()
             if existing is None:
                 session.add(OrganizationMembershipRow(id=uuid4().hex, organization_id=organization_id, user_id=user_id, role=role, status="active", invited_by=None, joined_at=now, created_at=now, updated_at=now))
             else:
@@ -126,25 +113,21 @@ class SqlAlchemyAuthRepository:
             session.commit()
         org_row = self._load_organization(organization_id)
         org = OrganizationSummary(id=organization_id, name=org_row.name if org_row else organization_id, slug=organization_id)
-        return MembershipSummary(organization=org, role=role, permissions=permissions or [Permission(p) for p in role_permissions(role) if p in Permission._value2member_map_], active=True)
+        return MembershipSummary(organization=org, role=role, permissions=permissions or sorted(role_permissions(role)), active=True)
 
     def _load_organization(self, organization_id: str):
         with self.session_factory() as session:
             return session.get(OrganizationRow, organization_id)
 
     def list_memberships(self, user_id: str) -> list[MembershipSummary]:
-        if select is None:
-            return []
         with self.session_factory() as session:
             items: list[MembershipSummary] = []
             stmt = select(OrganizationMembershipRow, OrganizationRow).join(OrganizationRow, OrganizationMembershipRow.organization_id == OrganizationRow.id).where(OrganizationMembershipRow.user_id == user_id)
             for membership_row, org_row in session.execute(stmt).all():
-                items.append(MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active"))
+                items.append(MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=sorted(role_permissions(membership_row.role)), active=membership_row.status == "active"))
             return items
 
     def list_organization_memberships(self, organization_id: str) -> list[tuple[User, MembershipSummary]]:
-        if select is None:
-            return []
         with self.session_factory() as session:
             stmt = select(UserRow, OrganizationMembershipRow, OrganizationRow).join(OrganizationMembershipRow, OrganizationMembershipRow.user_id == UserRow.id).join(OrganizationRow, OrganizationRow.id == OrganizationMembershipRow.organization_id).where(OrganizationMembershipRow.organization_id == organization_id)
             items: list[tuple[User, MembershipSummary]] = []
@@ -152,7 +135,7 @@ class SqlAlchemyAuthRepository:
                 user = self._to_user(user_row)
                 if user is None:
                     continue
-                membership = MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active")
+                membership = MembershipSummary(organization=OrganizationSummary(id=org_row.id, name=org_row.name, slug=org_row.id), role=membership_row.role, permissions=sorted(role_permissions(membership_row.role)), active=membership_row.status == "active")
                 items.append((user, membership))
             return items
 
@@ -173,5 +156,5 @@ class SqlAlchemyAuthRepository:
             org = session.get(OrganizationRow, organization_id)
             if user is None or org is None:
                 raise KeyError("membership not found")
-            membership = MembershipSummary(organization=OrganizationSummary(id=org.id, name=org.name, slug=org.id), role=membership_row.role, permissions=[Permission(p) for p in role_permissions(membership_row.role) if p in Permission._value2member_map_], active=membership_row.status == "active")
+            membership = MembershipSummary(organization=OrganizationSummary(id=org.id, name=org.name, slug=org.id), role=membership_row.role, permissions=sorted(role_permissions(membership_row.role)), active=membership_row.status == "active")
             return user, membership

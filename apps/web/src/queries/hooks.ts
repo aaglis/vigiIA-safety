@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { login, me } from '../api/auth'
 import { acknowledgeIncident, dismissIncident, getIncident, getIncidentAuditLog, listIncidents, resolveIncident } from '../api/incidents'
-import { getEvidenceDownloadUrl, listEvidence } from '../api/evidence'
+import { getEvidenceDownloadUrl, listEvidence, type EvidenceListParams } from '../api/evidence'
 import { createInvite, listInvites, resendInvite, revokeInvite } from '../api/invites'
 import { deactivateMember, listMembers, updateMember } from '../api/members'
 import { createOperationCamera, createOperationSite, createOperationZone, deleteOperationCamera, deleteOperationSite, deleteOperationZone, getOperationsCatalog, updateOperationCamera, updateOperationSite, updateOperationZone } from '../api/operations'
@@ -12,7 +12,7 @@ export function useCurrentUser(enabled = true) { return useQuery({ queryKey: que
 export function useIncidents(orgId: string | null, filters: Parameters<typeof listIncidents>[1] = {}, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.incidents(orgId, filters) : ['incidents', 'none'] as const, queryFn: () => listIncidents(orgId!, filters), enabled: enabled && !!orgId, staleTime: 10_000 }) }
 export function useIncidentDetail(orgId: string | null, incidentId: string | null, enabled = true) { return useQuery({ queryKey: orgId && incidentId ? queryKeys.incidentDetail(orgId, incidentId) : ['incident-detail', 'none'] as const, queryFn: () => getIncident(orgId!, incidentId!), enabled: enabled && !!orgId && !!incidentId, staleTime: 10_000 }) }
 export function useIncidentAudit(orgId: string | null, incidentId: string | null, enabled = true) { return useQuery({ queryKey: orgId && incidentId ? queryKeys.incidentAudit(orgId, incidentId) : ['incident-audit', 'none'] as const, queryFn: () => getIncidentAuditLog(orgId!, incidentId!), enabled: enabled && !!orgId && !!incidentId, staleTime: 10_000 }) }
-export function useEvidence(orgId: string | null, incidentId: string | null, enabled = true) { return useQuery({ queryKey: orgId && incidentId ? queryKeys.evidence(orgId, incidentId) : ['evidence', 'none'] as const, queryFn: () => listEvidence(orgId!, incidentId!), enabled: enabled && !!orgId && !!incidentId, staleTime: 10_000 }) }
+export function useEvidence(orgId: string | null, incidentId: string | null, params: EvidenceListParams = {}, enabled = true) { return useQuery({ queryKey: orgId && incidentId ? queryKeys.evidence(orgId, incidentId, params) : ['evidence', 'none'] as const, queryFn: () => listEvidence(orgId!, incidentId!, params), enabled: enabled && !!orgId && !!incidentId, staleTime: 10_000 }) }
 export function useOperationsCatalog(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.operationsCatalog(orgId) : ['operations-catalog', 'none'] as const, queryFn: () => getOperationsCatalog(orgId!), enabled: enabled && !!orgId, staleTime: 30_000 }) }
 export function useInvites(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.invites(orgId) : ['invites', 'none'] as const, queryFn: () => listInvites(orgId!), enabled: enabled && !!orgId, staleTime: 10_000 }) }
 export function useMembers(orgId: string | null, enabled = true) { return useQuery({ queryKey: orgId ? queryKeys.members(orgId) : ['members', 'none'] as const, queryFn: () => listMembers(orgId!), enabled: enabled && !!orgId, staleTime: 10_000 }) }
@@ -50,7 +50,7 @@ export function useMemberActions(orgId: string | null) {
 
 export function useIncidentActions(orgId: string | null) {
   const qc = useQueryClient()
-  const invalidate = async (incidentId?: string) => { if (!orgId) return; await Promise.all([qc.invalidateQueries({ queryKey: ['incidents', orgId] }), incidentId ? qc.invalidateQueries({ queryKey: queryKeys.incidentDetail(orgId, incidentId) }) : Promise.resolve(), incidentId ? qc.invalidateQueries({ queryKey: queryKeys.incidentAudit(orgId, incidentId) }) : Promise.resolve(), incidentId ? qc.invalidateQueries({ queryKey: queryKeys.evidence(orgId, incidentId) }) : Promise.resolve()]) }
+  const invalidate = async (incidentId?: string) => { if (!orgId) return; await Promise.all([qc.invalidateQueries({ queryKey: ['incidents', orgId] }), incidentId ? qc.invalidateQueries({ queryKey: queryKeys.incidentDetail(orgId, incidentId) }) : Promise.resolve(), incidentId ? qc.invalidateQueries({ queryKey: queryKeys.incidentAudit(orgId, incidentId) }) : Promise.resolve(), incidentId ? qc.invalidateQueries({ queryKey: ['evidence', orgId, incidentId] }) : Promise.resolve()]) }
   return {
     acknowledge: useMutation({ mutationFn: ({ incidentId }: { incidentId: string }) => acknowledgeIncident(orgId!, incidentId), onSuccess: (_data: unknown, vars: { incidentId: string }) => void invalidate(vars.incidentId) }),
     resolve: useMutation({ mutationFn: ({ incidentId }: { incidentId: string }) => resolveIncident(orgId!, incidentId), onSuccess: (_data: unknown, vars: { incidentId: string }) => void invalidate(vars.incidentId) }),

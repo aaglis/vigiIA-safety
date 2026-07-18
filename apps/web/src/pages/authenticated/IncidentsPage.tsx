@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { AuditLogEntry, Incident, IncidentStatus } from '../../api/incidents'
+import type { PageInfo } from '../../api/types'
 import { Icon } from '../../components/ui/icons'
 
 type IncidentPeriod = 'all' | '24h' | '7d' | '30d' | 'custom'
@@ -92,6 +93,8 @@ export function IncidentsPage({
   filteredSiteOptions,
   filteredCameraOptions,
   filteredZoneOptions,
+  incidentPageInfo,
+  incidentLoadingMore,
   connectionTone,
   mode,
   actionBusy,
@@ -101,6 +104,7 @@ export function IncidentsPage({
   onResetIncidentFilters,
   onSelectIncident,
   onLoadIncidentContext,
+  onLoadMoreIncidents,
   onOpenEvidence,
   onHandleAction,
   onOpenWorkspaceSection,
@@ -120,6 +124,8 @@ export function IncidentsPage({
   filteredSiteOptions: Option[]
   filteredCameraOptions: Option[]
   filteredZoneOptions: Option[]
+  incidentPageInfo: PageInfo | null
+  incidentLoadingMore: boolean
   connectionTone: { border: string; bg: string; color: string; dot: string }
   mode: 'live' | 'demo' | null
   actionBusy: 'acknowledge' | 'resolve' | 'dismiss' | null
@@ -129,6 +135,7 @@ export function IncidentsPage({
   onResetIncidentFilters: () => void
   onSelectIncident: (id: string) => void
   onLoadIncidentContext: (incidentId: string) => void
+  onLoadMoreIncidents: () => void
   onOpenEvidence: () => void
   onHandleAction: (action: 'acknowledge' | 'resolve' | 'dismiss') => void
   onOpenWorkspaceSection: (section: 'evidence' | 'incidents') => void
@@ -157,6 +164,7 @@ export function IncidentsPage({
   const timeline = useMemo(() => [...auditLog].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()), [auditLog])
   const canAck = selectedIncident?.status === 'open'
   const canResolveOrDismiss = selectedIncident?.status === 'open' || selectedIncident?.status === 'acknowledged'
+  const incidentProgressLabel = incidentPageInfo ? `Exibindo ${incidents.length} de ${incidentPageInfo.total} incidentes` : `${incidents.length} incidentes`
 
   return (
     <div className="mx-auto flex max-w-[1200px] flex-col">
@@ -278,10 +286,22 @@ export function IncidentsPage({
               })
             )}
           </div>
-          {visibleIncidents.length > 0 ? (
-            <div className="flex items-center justify-between border-t border-[color:var(--divider)] px-4 py-2.5 text-xs text-[var(--muted-2)]">
-              <span>Mostrando {visibleIncidents.length} de {incidentSummary.total} incidentes</span>
-              {dashboardLoading ? <span className="font-mono-ui text-[11px]">atualizando…</span> : null}
+          {incidentPageInfo || incidents.length > 0 || dashboardLoading ? (
+            <div className="flex items-center justify-between gap-3 border-t border-[color:var(--divider)] px-4 py-2.5 text-xs text-[var(--muted-2)]">
+              <span>{incidentProgressLabel}</span>
+              <div className="flex items-center gap-2">
+                {dashboardLoading && incidents.length > 0 ? <span className="font-mono-ui text-[11px]">atualizando…</span> : null}
+                {incidentPageInfo?.has_next ? (
+                  <button
+                    type="button"
+                    onClick={onLoadMoreIncidents}
+                    disabled={incidentLoadingMore}
+                    className="inline-flex h-8 items-center rounded-[8px] border border-[color:var(--line)] bg-[var(--paper)] px-3 text-[12px] font-medium text-[var(--ink)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {incidentLoadingMore ? 'Carregando…' : 'Carregar mais'}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>

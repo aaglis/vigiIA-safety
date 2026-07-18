@@ -10,12 +10,13 @@ from urllib.parse import quote
 from .config import default_config
 from .client import EdgeApiClient
 from .buffer import DetectionBuffer
+from .detector import DetectionResult
 from .detector_factory import DetectorSelection, build_detector
 from .evidence import build_snapshot
 from .events import validate_detection_event, validate_heartbeat_event
 from .heartbeat import build_heartbeat
 from .mock_detector import detect_once
-from .rules import RuleEngine
+from .rules import AppliedDetection, RuleEngine
 from .source import FrameSourceError, build_frame_source
 from .telemetry import TelemetryState, sanitize_error, structured_log
 
@@ -52,6 +53,11 @@ def _publish_frame_analysis(client, detector, frame) -> None:
         client.publish_frame_analysis({"camera_id": frame.camera_id, "timestamp": frame.timestamp, **analysis})
     except Exception as exc:
         structured_log("edge_worker.frame_analysis_failed", request_id=getattr(client, "request_id", None), correlation_id=getattr(client, "request_id", None), camera_id=frame.camera_id, site_id=frame.site_id, organization_id=frame.organization_id, latency_ms=None, result="failed", error=sanitize_error(exc))
+
+
+def _frame_analysis_interval_seconds(config) -> float:
+    fps = max(1.0, min(5.0, float(getattr(config, "edge_frame_analysis_fps", 2.0))))
+    return 1.0 / fps
 
 
 def _refresh_inactive_rules(detector, telemetry) -> None:
@@ -132,6 +138,66 @@ def _upload_frame_bytes(client, upload_ref: dict | None, frame, telemetry: Telem
         return {"upload_status": "failed", "upload_error": sanitize_error(exc)}
 
 
+def _annotated_evidence_for_results(frame, emitted_results: list[DetectionResult], original_results: list[DetectionResult]) -> bytes | None:
+    """Gera um JPEG que desenha exatamente as violações que viraram eventos.
+
+    O detector real pode ter anotado todas as violações brutas do frame antes do cooldown.
+    Se alguma delas for suprimida, reaproveitar esse JPEG faria a prova afirmar algo que
+    não foi registrado. Por isso a anotação compartilhada do frame é montada aqui, depois
+    da decisão de emissão.
+    """
+    if not emitted_results:
+        return None
+    shared_jpeg = emitted_results[0].annotated_jpeg
+    if shared_jpeg and len(emitted_results) == len(original_results) and all(result.annotated_jpeg == shared_jpeg for result in emitted_results):
+        return shared_jpeg
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+
+        if frame.frame is not None:
+            image = frame.frame.copy()
+        elif frame.image_bytes:
+            image = cv2.imdecode(np.frombuffer(frame.image_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if image is None:
+                return None
+        else:
+            return None
+        height, width = image.shape[:2]
+        groups: dict[tuple[float, float, float, float], list[DetectionResult]] = {}
+        for result in emitted_results:
+            evidence = result.evidence or {}
+            raw_bbox = evidence.get("bbox") if isinstance(evidence, dict) else None
+            if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+                continue
+            bbox = (
+                round(float(raw_bbox[0]), 3),
+                round(float(raw_bbox[1]), 3),
+                round(float(raw_bbox[2]), 3),
+                round(float(raw_bbox[3]), 3),
+            )
+            groups.setdefault(bbox, []).append(result)
+        if not groups:
+            return None
+        colors = {"ppe_violation": (0, 0, 200), "restricted_intrusion": (0, 140, 220)}
+        default_color = (0, 140, 220)
+        for bbox, items in groups.items():
+            x1, y1, x2, y2 = bbox
+            p1 = (int(x1 * width), int(y1 * height))
+            p2 = (int(x2 * width), int(y2 * height))
+            box_color = colors.get(items[0].event_type, default_color)
+            cv2.rectangle(image, p1, p2, box_color, 2)
+            for index, item in enumerate(items):
+                label_y = max(12, p1[1] - 6 - index * 16)
+                cv2.putText(image, item.event_type, (p1[0], label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(item.event_type, default_color), 1)
+        ok, buffer = cv2.imencode(".jpg", image)
+        return buffer.tobytes() if ok else None
+    except Exception:
+        if len(emitted_results) == 1 and len(original_results) == 1:
+            return emitted_results[0].annotated_jpeg
+        return None
+
+
 def _safe_request_evidence_upload(client, file_id: str, buffer: DetectionBuffer | None = None):
     try:
         return client.request_evidence_upload(file_id=file_id)
@@ -185,6 +251,8 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
     # worker apareceria offline enquanto trabalha (o job `run_offline_workers` usa
     # last_heartbeat_at). Por isso vai também de tempos em tempos, aqui dentro.
     ultimo_heartbeat = time.monotonic()
+    last_frame_analysis_at: float | None = None
+    analysis_interval = _frame_analysis_interval_seconds(config)
     for frame in source.frames():
         if api_mode and (time.monotonic() - ultimo_heartbeat) >= config.edge_heartbeat_interval_seconds:
             _send_heartbeat(config, client, telemetry, processed_frames, emitted_events, buffer, api_mode, detector)
@@ -193,43 +261,53 @@ def _run_pipeline(config, selection, detector, source, rules=None, client=None, 
         results = detector.detect(frame)
         telemetry.record_inference_latency((time.perf_counter() - infer_started) * 1000)
         frames.append(frame)
-        detector_results.append(results[0] if results else None)
+        detector_results.append(list(results) if results else None)
         processed_frames += 1
-        if api_mode:
-            _publish_frame_analysis(client, detector, frame)
+        if api_mode and client is not None and getattr(detector, "last_analysis", None):
+            now = time.monotonic()
+            if last_frame_analysis_at is None or (now - last_frame_analysis_at) >= analysis_interval:
+                _publish_frame_analysis(client, detector, frame)
+                last_frame_analysis_at = now
         if not results:
             if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
                 break
             continue
+        emitted: list[tuple[DetectionResult, AppliedDetection | None]] = []
+        for result in results:
+            applied = rules.apply(frame, result) if rules is not None else None
+            if rules is not None and applied is None:
+                continue
+            emitted.append((result, applied))
+        if not emitted:
+            if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
+                break
+            continue
+
+        emitted_results = [result for result, _ in emitted]
         file_id = uuid4().hex
-        annotated = getattr(results[0], "annotated_jpeg", None)
+        annotated = _annotated_evidence_for_results(frame, emitted_results, list(results))
         upload_ref = None
         if api_mode and client is not None:
             upload_ref = _safe_request_evidence_upload(client, file_id, buffer=buffer)
         upload_result = _upload_frame_bytes(client, upload_ref, frame, telemetry=telemetry, image_bytes=annotated) if api_mode and client is not None else {"upload_status": "skipped", "reason": "api_disabled"}
         evidence_payload = _evidence_payload(config, frame, upload_path=upload_ref.get("upload_path") if upload_ref else None, file_id=file_id, image_bytes=annotated)
         evidence_payload.update(upload_result)
-        applied = rules.apply(frame, results[0]) if rules is not None else None
-        if rules is not None and applied is None:
-            if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
-                break
-            continue
-        result = results[0]
-        detection = _build_detection(config, selection, frame, result)
-        if applied is not None:
-            detection["event_type"] = applied.event_type
-            detection["severity"] = applied.severity
-            detection["summary"] = applied.summary
-            detection["zone_id"] = applied.zone_id
-            detection["metadata"] = {**detection["metadata"], **applied.metadata}
-        detection["evidence"] = evidence_payload
-        validate_detection_event(detection)
-        detections.append(detection)
-        emitted_events += 1
-        if api_mode and client is not None:
-            send_started = time.perf_counter()
-            _send_detection(client, detection, buffer=buffer, telemetry=telemetry)
-            telemetry.record_send_latency((time.perf_counter() - send_started) * 1000)
+        for result, applied in emitted:
+            detection = _build_detection(config, selection, frame, result)
+            if applied is not None:
+                detection["event_type"] = applied.event_type
+                detection["severity"] = applied.severity
+                detection["summary"] = applied.summary
+                detection["zone_id"] = applied.zone_id
+                detection["metadata"] = {**detection["metadata"], **applied.metadata}
+            detection["evidence"] = dict(evidence_payload)
+            validate_detection_event(detection)
+            detections.append(detection)
+            emitted_events += 1
+            if api_mode and client is not None:
+                send_started = time.perf_counter()
+                _send_detection(client, detection, buffer=buffer, telemetry=telemetry)
+                telemetry.record_send_latency((time.perf_counter() - send_started) * 1000)
         if config.edge_max_frames is not None and processed_frames >= config.edge_max_frames:
             break
         if config.edge_frame_interval_seconds > 0:

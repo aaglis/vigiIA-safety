@@ -268,7 +268,8 @@ export function OperationsLayout() {
         camera={cameraModal?.camera}
         onClose={() => setCameraModal(null)}
         onSubmit={async (values) => {
-          if (cameraModal?.camera) await onUpdateCamera(cameraModal.camera.id, values)
+          const payload = { site_id: values.site_id, name: values.name, status: values.status, ...(values.stream_identifier.trim() ? { stream_identifier: values.stream_identifier.trim() } : {}) }
+          if (cameraModal?.camera) await onUpdateCamera(cameraModal.camera.id, payload)
           else await onCreateCamera(values)
           setCameraModal(null)
         }}

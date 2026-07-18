@@ -1,7 +1,9 @@
 {
   "name": "vigia-safety",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "python -m vigia_api.main",
@@ -9,5 +11,9 @@
     "validate:secrets": "bash scripts/check-secrets.sh",
     "validate:ci-smoke": "bash scripts/ci-smoke.sh",
     "test:e2e:web": "npm --workspace apps/web run test:e2e"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7"
   }
 }

@@ -1,34 +1,6 @@
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import APIRouter, Header, HTTPException, Request
-except Exception:  # pragma: no cover
-    if TYPE_CHECKING:
-        from fastapi import APIRouter, Header, HTTPException, Request
-    else:
-        class APIRouter:  # type: ignore[no-redef]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def get(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
-
-        class Header:  # type: ignore[no-redef]
-            def __init__(self, default: Any = None, alias: str | None = None):
-                self.default = default
-                self.alias = alias
-
-        class HTTPException(Exception):  # type: ignore[no-redef]
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
-
-        class Request:  # type: ignore[no-redef]
-            pass
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from ... import db as db_module
 from ...observability import snapshot_metrics

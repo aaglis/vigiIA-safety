@@ -30,6 +30,7 @@ API principal do VigIA Safety.
 - `python -m unittest discover -s tests -p "test_*.py"`
 - Migrations: `alembic -c alembic.ini upgrade head`
 - Autogenerate: `alembic -c alembic.ini revision --autogenerate -m "message"`
+- Postgres integration flows: `POSTGRES_TEST_DATABASE_URL=postgresql+psycopg://... bash ../../scripts/postgres-integration-tests.sh`
 - Auth: `docs/security/auth-session-strategy.md`
 - Platform admin: `docs/architecture/platform-admin.md`
 - RBAC: `docs/architecture/rbac-enforcement.md`
@@ -55,5 +56,16 @@ API principal do VigIA Safety.
 - Seed demo idempotente: `PYTHONPATH=src python -m vigia_api.scripts.seed_demo`
 - Credenciais demo: `admin@vigia.local` / `change-me-dev`
 - Organização demo: `org-demo` com membership `org_owner`.
+
+## Teste contra Postgres real
+
+Para validar os fluxos críticos no backend SQL real sem pesar o `validate` local:
+
+```bash
+export POSTGRES_TEST_DATABASE_URL="postgresql+psycopg://vigia:vigia@127.0.0.1:5432/vigia_test"
+bash ../../scripts/postgres-integration-tests.sh
+```
+
+O script roda `alembic upgrade head` e depois apenas `test_postgres*.py`.
 
 > Dependências ainda não estão instaladas neste repositório.

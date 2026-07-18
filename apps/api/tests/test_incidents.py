@@ -154,6 +154,22 @@ class IncidentsTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["id"], i1.id)
         self.assertEqual(incidents_api.list_incidents("org-1", Request(), limit=1, offset=1)["page_info"]["offset"], 1)
 
+    def test_list_incidents_orders_by_created_desc_then_id_and_counts_total(self) -> None:
+        repo = InMemoryIncidentRepository()
+        first = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high", "summary": "A"}))
+        second = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-2", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high", "summary": "B"}))
+        third = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-3", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high", "summary": "C"}))
+        class Request: app = type("A", (), {"state": type("S", (), {"container": type("C", (), {"incident_repository": repo})()})()})()
+        page1 = incidents_api.list_incidents("org-1", Request(), limit=2, offset=0)
+        page2 = incidents_api.list_incidents("org-1", Request(), limit=2, offset=2)
+        self.assertEqual(page1["page_info"], {"limit": 2, "offset": 0, "total": 3, "has_next": True})
+        self.assertEqual([item["id"] for item in page1["items"]], [third.id, second.id])
+        self.assertEqual(page2["page_info"], {"limit": 2, "offset": 2, "total": 3, "has_next": False})
+        self.assertEqual([item["id"] for item in page2["items"]], [first.id])
+        empty = incidents_api.list_incidents("org-1", Request(), limit=2, offset=99)
+        self.assertEqual(empty["items"], [])
+        self.assertFalse(empty["page_info"]["has_next"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,6 +58,16 @@ class EvidenceRepositoryPersistenceTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             service.get_download_url("org-2", "inc-1", "file-1", "actor-1")
 
+    def test_list_by_incident_orders_and_paginates(self) -> None:
+        service = self._service()
+        first = service.register_evidence("org-1", "inc-1", "file-1", "image/jpeg", 123, "user-1", EvidenceSource.USER)
+        second = service.register_evidence("org-1", "inc-1", "file-2", "image/jpeg", 123, "user-1", EvidenceSource.USER)
+        third = service.register_evidence("org-1", "inc-1", "file-3", "image/jpeg", 123, "user-1", EvidenceSource.USER)
+        repo = cast(Any, service.metadata_repository)
+        page1 = repo.list_by_incident("org-1", "inc-1")[:2]
+        self.assertEqual([item.file_id for item in page1], [third.file_id, second.file_id])
+        self.assertEqual(repo.get("org-1", "inc-1", "file-1").file_id, "file-1")
+
 
 if __name__ == "__main__":
     unittest.main()

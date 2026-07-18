@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
-from typing import cast
+from typing import Any, cast
 
 from vigia_api.services.edge_workers import EdgeWorkerService
 from vigia_api.api.v1 import edge_workers as edge_workers_api
@@ -57,6 +57,45 @@ class EdgeWorkersTest(unittest.TestCase):
         self.assertEqual(metadata["event_type"], "person_detected")
         self.assertEqual(metadata["model_version"], "v1.2.3")
 
+    def test_heartbeat_route_persists_telemetry_and_list_returns_it(self) -> None:
+        container = type("Container", (), {"edge_worker_service": self.service})()
+        request = type("Request", (), {"app": type("App", (), {"state": type("State", (), {"container": container})()})()})()
+
+        class Organization:
+            id = "org-1"
+
+        class Membership:
+            organization = Organization()
+
+        telemetry = {
+            "state": "ok",
+            "cv_mode": "real",
+            "source_type": "rtsp",
+            "processed_frames": 42,
+            "emitted_events": 3,
+            "avg_inference_latency_ms": 18.7,
+            "avg_send_latency_ms": 2.3,
+            "pending_queue": 1,
+            "inactive_rules": ["ppe_violation:modelo-sem-classe-de-capacete"],
+            "last_error": "rtsp://worker:***@camera.local/stream",
+        }
+        payload = edge_workers_api.EdgeWorkerHeartbeatIn(
+            client_id=self.worker.client_id,
+            organization_id="org-1",
+            site_id="site-a",
+            sent_at="2026-01-01T00:00:00Z",
+            version="v1",
+            status=telemetry,
+        )
+
+        result = edge_workers_api.worker_heartbeat(payload, request=cast(Any, request), x_edge_client_id=self.worker.client_id, x_edge_api_key=self.api_key)
+        returned_worker = cast(dict[str, object], result["worker"])
+        self.assertEqual(returned_worker["last_telemetry"], telemetry)
+
+        listed = edge_workers_api.list_workers("org-1", request=cast(Any, request), membership=Membership())
+        item = cast(dict[str, object], cast(list[object], listed["items"])[0])
+        self.assertEqual(item["last_telemetry"], telemetry)
+
     def test_retried_detection_event_is_idempotent(self) -> None:
         payload: dict[str, object] = {
             "event_id": "evt-retry-1",
@@ -111,7 +150,7 @@ class EdgeWorkersTest(unittest.TestCase):
             app = type("App", (), {"state": type("State", (), {})()})()
 
         payload = edge_workers_api.EdgeWorkerCreateIn(organization_id="org-1", site_id="site-a", name="Demo", allowed_camera_ids=["cam-1"])
-        result = edge_workers_api.register_worker("org-1", payload, request=Request(), membership=Membership())
+        result = edge_workers_api.register_worker("org-1", payload, request=cast(Any, Request()), membership=Membership())
         self.assertEqual(result["worker"]["organization_id"], "org-1")
 
 

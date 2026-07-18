@@ -20,6 +20,31 @@ jobs:
       - name: Run local validation
         run: bash scripts/validate.sh
 
+  frontend:
+    name: Frontend typecheck build and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck frontend
+        run: npm --workspace apps/web run typecheck
+      - name: Build frontend
+        run: npm --workspace apps/web run build
+      - name: Run frontend unit tests
+        run: npm --workspace apps/web run test:unit
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run frontend smoke
+        env:
+          E2E_WEB_SERVER_COMMAND: npm run preview -- --host 127.0.0.1 --port 5174
+        run: npm --workspace apps/web run test:e2e:smoke
+
   secret-gate:
     name: Secret scan gate
     runs-on: ubuntu-latest
@@ -40,5 +65,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Optional real CV model artifact
+        env:
+          CV_MODEL_URL: ${{ secrets.CV_MODEL_URL }}
+        run: |
+          if [ -n "$CV_MODEL_URL" ]; then
+            mkdir -p apps/edge-worker/models
+            curl --fail --location --silent --show-error "$CV_MODEL_URL" --output apps/edge-worker/models/ppe-multiclass.pt
+          else
+            echo "CV_MODEL_URL secret not configured; real CV evaluation will be skipped."
+          fi
       - name: Run Compose smoke
+        env:
+          CV_REAL_EVAL_MIN_RECALL: '0.45'
         run: bash scripts/ci-smoke.sh
+
+  postgres-integration:
+    name: Postgres integration flows
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vigia
+          POSTGRES_PASSWORD: vigia
+          POSTGRES_DB: vigia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U vigia -d vigia_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install API dependencies
+        run: python -m pip install -e apps/api
+      - name: Run Postgres integration flows
+        env:
+          POSTGRES_TEST_DATABASE_URL: postgresql+psycopg://vigia:vigia@127.0.0.1:5432/vigia_test
+        run: bash scripts/postgres-integration-tests.sh

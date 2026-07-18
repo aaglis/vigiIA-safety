@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-try:
-    from sqlalchemy import select  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
+from sqlalchemy import select
 
 from ..domain.invites import InviteStatus, OrganizationInvite, QueuedEmail
 from .models import OrganizationInvite as InviteRow
@@ -70,15 +67,11 @@ class SqlAlchemyInviteRepository:
             return self._to_domain(session.get(InviteRow, invite_id))
 
     def find_by_token_hash(self, token_hash: str) -> OrganizationInvite | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             row = session.execute(select(InviteRow).where(InviteRow.token_hash == token_hash)).scalars().first()
             return self._to_domain(row)
 
     def list_by_organization(self, organization_id: str) -> list[OrganizationInvite]:
-        if select is None:
-            return []
         with self.session_factory() as session:
             rows = session.execute(select(InviteRow).where(InviteRow.organization_id == organization_id)).scalars().all()
             return [invite for invite in (self._to_domain(row) for row in rows) if invite is not None]

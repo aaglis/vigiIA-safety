@@ -69,6 +69,25 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(resend_repo.notifications("org-1", incident.id)[0].status, "failed")
         self.assertEqual(resend_repo.notifications("org-1", incident.id)[0].payload["reason"], "resend_misconfigured")
 
+
+    def test_incident_email_html_escapes_dynamic_fields(self) -> None:
+        class Incident:
+            severity = "<script>alert(1)</script>"
+            summary = "<b>boom</b>"
+            camera_id = "cam-<1>"
+            zone_id = "zone-&1"
+            site_id = "site-'x'"
+            created_at = "2026-01-01T00:00:00+00:00"
+
+        subject, body = __import__("vigia_api.services.notifications", fromlist=["build_incident_email"]).build_incident_email(Incident(), dashboard_url='javascript:alert(1)')
+        self.assertIn("&lt;SCRIPT&gt;ALERT(1)&lt;/SCRIPT&gt;", body)
+        self.assertIn("&lt;b&gt;boom&lt;/b&gt;", body)
+        self.assertNotIn("javascript:alert(1)", body)
+        self.assertNotIn("<script>", body)
+        self.assertIn("&lt;1&gt;", body)
+        self.assertIn("zone-&amp;1", body)
+        self.assertIn("site-&#x27;x&#x27;", body)
+        self.assertIn("<h2>[VigIA] &lt;SCRIPT&gt;ALERT(1)&lt;/SCRIPT&gt; — &lt;b&gt;boom&lt;/b&gt;</h2>", body)
     def test_resend_delivery_success_and_failure_are_recorded(self) -> None:
         configured = Settings(incident_notification_mode="resend", resend_api_key="re_live_abc123456789", notification_from="alerts@example.com")
 

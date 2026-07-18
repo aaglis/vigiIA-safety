@@ -1,6 +1,7 @@
 import unittest
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from vigia_api.domain.incidents import IncidentStatus, parse_detection_event
 
 try:
@@ -73,6 +74,48 @@ class IncidentRepositoryPersistenceTest(unittest.TestCase):
         self.assertNotEqual(first.id, other_org.id)
         self.assertEqual(len(repo.list_by_organization("org-1")), 2)
         self.assertEqual(len(repo.audit_logs("org-1", first.id)), 1)
+
+    def test_list_filtered_applies_sql_pagination_and_total_ordering(self) -> None:
+        repo = self._repo()
+        first = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
+        second = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-2", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
+        third = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-3", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
+        page1 = repo.list_filtered("org-1", limit=2, offset=0)
+        page2 = repo.list_filtered("org-1", limit=2, offset=2)
+        self.assertEqual(repo.count_filtered("org-1"), 3)
+        self.assertEqual([item.id for item in page1], [third.id, second.id])
+        self.assertEqual([item.id for item in page2], [first.id])
+        self.assertEqual(repo.list_filtered("org-1", limit=2, offset=99), [])
+
+    def test_create_from_detection_recovers_from_unique_constraint_race(self) -> None:
+        repo = self._repo()
+        incident = repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
+        raced = self._repo()
+        original_save = raced.save
+
+        class FakeIntegrityOrig(Exception):
+            diag = type("D", (), {"constraint_name": "uq_incidents_org_detection_event"})()
+
+        def fake_save(_incident):
+            raise IntegrityError("insert", {}, FakeIntegrityOrig("UNIQUE constraint failed: incidents.organization_id, incidents.detection_event_id"))
+
+        raced.save = fake_save  # type: ignore[assignment]
+        result = raced.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-1", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
+        self.assertEqual(result.id, incident.id)
+        raced.save = original_save  # type: ignore[assignment]
+
+    def test_create_from_detection_reraises_unrelated_integrity_error(self) -> None:
+        repo = self._repo()
+
+        class FakeIntegrityOrig(Exception):
+            pass
+
+        def fake_save(_incident):
+            raise IntegrityError("insert", {}, FakeIntegrityOrig("NOT NULL constraint failed: incidents.summary"))
+
+        repo.save = fake_save  # type: ignore[assignment]
+        with self.assertRaises(IntegrityError):
+            repo.create_from_detection(parse_detection_event({"organization_id": "org-1", "event_id": "evt-x", "camera_id": "cam-1", "zone_id": "zone-1", "severity": "high"}))
 
 
 if __name__ == "__main__":

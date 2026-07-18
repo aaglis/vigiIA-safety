@@ -33,7 +33,7 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vigia} # dev-only
@@ -46,7 +46,7 @@ services:
 
   # Cria o bucket de evidência no MinIO (o dev não tinha esse passo).
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
     depends_on:
       minio:
         condition: service_started
@@ -110,6 +110,48 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
+
+  scheduler:
+    image: vigia-api:dev
+    build:
+      context: ../../apps/api
+    env_file:
+      - ../../.env.example
+    environment:
+      APP_ENV: dev
+      REPOSITORY_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg://vigia:vigia@postgres:5432/vigia
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_BACKEND: redis
+      MINIO_ENDPOINT: http://minio:9000
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:${MINIO_HOST_PORT:-9000}
+      ALLOW_INTERNAL_S3_ENDPOINT: "true"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-vigia}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-vigia12345}
+      JWT_SECRET: dev-only-jwt-secret-change-me
+      REFRESH_TOKEN_SECRET: dev-only-refresh-secret-change-me
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-alerts@vigia.local}
+      INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      INCIDENT_NOTIFICATION_RECIPIENTS: '${INCIDENT_NOTIFICATION_RECIPIENTS:-["ops@vigia.local"]}'
+      EDGE_WORKER_CLIENT_ID: dev-client-id
+      EDGE_WORKER_API_KEY: dev-api-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    command: ["python", "-m", "vigia_api.scripts.jobs_scheduler"]
+    restart: unless-stopped
 
   migrate:
     image: vigia-api:dev
@@ -182,6 +224,7 @@ services:
       # mesma inferência. Com um modelo sem classe de capacete (ex.: yolov8n/COCO), a regra
       # de EPI fica INATIVA de propósito — ver `inactive_rules` no heartbeat.
       CV_MODEL_PATH: ${CV_MODEL_PATH:-/models/ppe-multiclass.pt}
+      CV_REAL_MODEL_VERSION: ${CV_REAL_MODEL_VERSION:-ppe-multiclass-1}
       CV_CONFIDENCE_THRESHOLD: ${CV_CONFIDENCE_THRESHOLD:-0.4}
       EDGE_VIDEO_FRAME_STRIDE: ${EDGE_VIDEO_FRAME_STRIDE:-15}
       # false = fica vivo como câmera 24/7 (default: é o que a produção faz e o que o

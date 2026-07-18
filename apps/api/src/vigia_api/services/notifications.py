@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from html import escape
 from typing import Any, Protocol
 
 
@@ -69,7 +70,7 @@ def build_notifier(settings_obj: Any) -> Notifier:
 
 def build_incident_email(incident: Any, *, dashboard_url: str | None = None) -> tuple[str, str]:
     severity = str(getattr(incident, "severity", "")).upper()
-    summary = getattr(incident, "summary", None) or "Incidente de segurança detectado"
+    summary = str(getattr(incident, "summary", None) or "Incidente de segurança detectado")
     subject = f"[VigIA] {severity} — {summary}"
     rows = {
         "Severidade": severity,
@@ -79,7 +80,11 @@ def build_incident_email(incident: Any, *, dashboard_url: str | None = None) -> 
         "Site": getattr(incident, "site_id", "—"),
         "Detectado em": getattr(incident, "created_at", "—"),
     }
-    lines = "".join(f"<tr><td><b>{key}</b></td><td>{value}</td></tr>" for key, value in rows.items())
-    link = f'<p><a href="{dashboard_url}">Abrir no dashboard</a></p>' if dashboard_url else ""
-    body = f"<h2>{subject}</h2><table>{lines}</table>{link}"
+    lines = "".join(f"<tr><td><b>{escape(str(key))}</b></td><td>{escape(str(value))}</td></tr>" for key, value in rows.items())
+    link = ""
+    if dashboard_url:
+        escaped_url = escape(dashboard_url, quote=True)
+        if dashboard_url.startswith(("http://", "https://")):
+            link = f'<p><a href="{escaped_url}" rel="noreferrer noopener">Abrir no dashboard</a></p>'
+    body = f"<h2>{escape(subject)}</h2><table>{lines}</table>{link}"
     return subject, body

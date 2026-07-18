@@ -8,10 +8,16 @@ export interface EdgeWorkerTelemetry {
   emitted_events?: number
   pending_queue?: number
   avg_inference_latency_ms?: number
+  avg_send_latency_ms?: number
+  worker_version?: string
+  buffered_events?: number
+  api_errors?: number
+  source_errors?: number
   /** Regras que o modelo carregado NÃO consegue avaliar (ex.: EPI sem classe de capacete).
    *  Sem isto na tela, "zero incidentes" parece conformidade e pode ser cegueira. */
   inactive_rules?: string[]
   last_error?: string | null
+  last_result?: string | null
   state?: string
 }
 

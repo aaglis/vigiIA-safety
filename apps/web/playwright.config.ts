@@ -4,6 +4,7 @@ declare const process: { env: Record<string, string | undefined> }
 
 const e2ePort = Number(process.env.E2E_PORT ?? 5174)
 const e2eBaseURL = `http://127.0.0.1:${e2ePort}`
+const e2eWebServerCommand = process.env.E2E_WEB_SERVER_COMMAND ?? `npm run dev -- --host 127.0.0.1 --port ${e2ePort}`
 
 export default defineConfig({
   testDir: './tests',
@@ -19,7 +20,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${e2ePort}`,
+    command: e2eWebServerCommand,
     url: e2eBaseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

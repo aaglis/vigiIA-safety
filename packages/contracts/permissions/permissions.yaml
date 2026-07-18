@@ -41,8 +41,6 @@ permissions:
     roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
   - key: workers.register
     roles: [platform_owner, platform_admin, org_owner, org_admin, manager]
-  - key: rules.manage
-    roles: [platform_owner, platform_admin, org_owner, org_admin]
   - key: incidents.read
     roles: [platform_owner, platform_admin, platform_support, org_owner, org_admin, manager, auditor_viewer]
   - key: incidents.write

@@ -89,7 +89,7 @@ export function ZoneForm({
       </SelectField>
       <TextField
         label="Nome da área"
-        placeholder="Ex.: Porta da Doca"
+        placeholder="Ex.: Piso da doca"
         helperText="Como essa área é chamada na planta. É o que aparece no alerta."
         errorText={errors.name?.message}
         {...register('name')}
@@ -109,9 +109,8 @@ export function ZoneForm({
           <div className="space-y-1.5">
             <div className="rounded-[10px] border border-[#E3D8C8] bg-[#F7F0E2] px-3.5 py-2.5">
               <p className="text-[12px] leading-5 text-[#5a4a2a]">
-                <span className="font-semibold">Marque a área do chão</span>, não a parede ou o objeto. A detecção olha
-                onde os pés da pessoa tocam o piso — desenhar sobre uma porta ao fundo não impede que alguém passe na
-                frente dela.
+                <span className="font-semibold">Polígono do piso em 2D.</span> Desenhe a área do chão onde a pessoa pisa; o sistema avalia o ponto dos pés/base.
+                Porta, parede ou objeto ao fundo não viram regra de entrada.
               </p>
             </div>
             <ZonePolygonEditor

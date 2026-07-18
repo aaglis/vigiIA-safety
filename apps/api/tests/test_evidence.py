@@ -149,6 +149,17 @@ class EvidenceTest(unittest.TestCase):
         logs = self.service.list_audit_logs("org-1", limit=1, offset=0)
         self.assertGreaterEqual(len(logs), 1)
 
+    def test_list_evidence_orders_by_created_desc_and_reports_total(self) -> None:
+        first = self.service.register_evidence("org-1", "inc-1", "file-1", "image/jpeg", 1, "user-1", EvidenceSource.USER)
+        second = self.service.register_evidence("org-1", "inc-1", "file-2", "image/jpeg", 1, "user-1", EvidenceSource.USER)
+        third = self.service.register_evidence("org-1", "inc-2", "file-3", "image/jpeg", 1, "user-1", EvidenceSource.USER)
+        page = evidence_api.list_evidence("org-1", request=type("Request", (), {"app": type("A", (), {"state": type("S", (), {"container": type("C", (), {"evidence_service": self.service})()})()})()})(), limit=2, offset=0)
+        self.assertEqual(page["page_info"], {"limit": 2, "offset": 0, "total": 3, "has_next": True})
+        self.assertEqual([item["file_id"] for item in page["items"]], [third.file_id, second.file_id])
+        empty = evidence_api.list_evidence("org-1", request=type("Request", (), {"app": type("A", (), {"state": type("S", (), {"container": type("C", (), {"evidence_service": self.service})()})()})()})(), limit=2, offset=99)
+        self.assertEqual(empty["items"], [])
+        self.assertFalse(empty["page_info"]["has_next"])
+
 
 if __name__ == "__main__":
     unittest.main()

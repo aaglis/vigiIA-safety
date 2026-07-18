@@ -5,10 +5,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, cast
 
-try:
-    from sqlalchemy import select  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from ..domain.edge_workers import EdgeWorker, EdgeWorkerStatus
 from ..domain.evidence import EvidenceAccessAuditLog
@@ -75,33 +73,49 @@ class SqlAlchemyIncidentRepository:
         if self.session_factory is None:
             raise RuntimeError("SQLAlchemy not available")
         with self.session_factory() as session:
-            row = IncidentRow(
-                id=incident.id,
-                organization_id=incident.organization_id,
-                site_id=incident.site_id,
-                detection_event_id=incident.detection_event_id,
-                camera_id=incident.camera_id,
-                zone_id=incident.zone_id,
-                worker_id=incident.worker_id,
-                event_type=incident.event_type,
-                severity=incident.severity,
-                summary=incident.summary,
-                confidence=incident.confidence,
-                status=incident.status.value,
-                acknowledged_at=incident.acknowledged_at,
-                acknowledged_by=incident.acknowledged_by,
-                resolved_at=incident.resolved_at,
-                resolved_by=incident.resolved_by,
-                resolution_reason=incident.resolution_reason,
-                dismissed_at=incident.dismissed_at,
-                dismissed_by=incident.dismissed_by,
-                dismiss_reason=incident.dismiss_reason,
-                metadata_json=json.dumps(incident.metadata),
-                created_at=incident.created_at,
-                updated_at=incident.updated_at,
-            )
-            session.merge(row)
-            session.commit()
+            try:
+                row = IncidentRow(
+                    id=incident.id,
+                    organization_id=incident.organization_id,
+                    site_id=incident.site_id,
+                    detection_event_id=incident.detection_event_id,
+                    camera_id=incident.camera_id,
+                    zone_id=incident.zone_id,
+                    worker_id=incident.worker_id,
+                    event_type=incident.event_type,
+                    severity=incident.severity,
+                    summary=incident.summary,
+                    confidence=incident.confidence,
+                    status=incident.status.value,
+                    acknowledged_at=incident.acknowledged_at,
+                    acknowledged_by=incident.acknowledged_by,
+                    resolved_at=incident.resolved_at,
+                    resolved_by=incident.resolved_by,
+                    resolution_reason=incident.resolution_reason,
+                    dismissed_at=incident.dismissed_at,
+                    dismissed_by=incident.dismissed_by,
+                    dismiss_reason=incident.dismiss_reason,
+                    metadata_json=json.dumps(incident.metadata),
+                    created_at=incident.created_at,
+                    updated_at=incident.updated_at,
+                )
+                session.merge(row)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                raise
+
+    def _is_detection_event_unique_violation(self, error: IntegrityError) -> bool:
+        message = str(getattr(error, "orig", error)).lower()
+        constraint = getattr(getattr(error, "orig", None), "diag", None)
+        constraint_name = getattr(constraint, "constraint_name", None)
+        if constraint_name == "uq_incidents_org_detection_event":
+            return True
+        return (
+            "uq_incidents_org_detection_event" in message
+            or "unique constraint failed: incidents.organization_id, incidents.detection_event_id" in message
+            or ("incidents.organization_id" in message and "detection_event_id" in message)
+        )
 
     def create_from_detection(self, event: DetectionEvent) -> Incident:
         existing = self.get_by_detection_event(event.organization_id, event.event_id)
@@ -125,7 +139,21 @@ class SqlAlchemyIncidentRepository:
             created_at=event.detected_at,
             updated_at=event.detected_at,
         )
-        self.save(incident)
+        try:
+            self.save(incident)
+        except IntegrityError as exc:
+            if not self._is_detection_event_unique_violation(exc):
+                from ..observability import log_event
+                log_event("incident.create_failed", organization_id=event.organization_id, detection_event_id=event.event_id, error_type=type(getattr(exc, "orig", exc)).__name__)
+                raise
+            existing = self.get_by_detection_event(event.organization_id, event.event_id)
+            if existing is not None:
+                from ..observability import log_event
+                log_event("incident.detection_duplicate", organization_id=event.organization_id, incident_id=existing.id, detection_event_id=event.event_id, source="unique_constraint")
+                return existing
+            from ..observability import log_event
+            log_event("incident.create_failed", organization_id=event.organization_id, detection_event_id=event.event_id, error_type=type(getattr(exc, "orig", exc)).__name__)
+            raise
         self._append_audit_log(incident.organization_id, incident.id, "created", None, incident.status.value, "system", incident.created_at, {"detection_event_id": event.event_id})
         self._enqueue_notification(incident)
         return incident
@@ -154,8 +182,12 @@ class SqlAlchemyIncidentRepository:
     def _notification_to_domain(self, row: NotificationRow) -> NotificationAttempt:
         payload = json.loads(row.payload_json or "{}")
         if row.processed_at is not None:
-            payload = {**payload, "processed_at": self._ensure_aware_utc(row.processed_at).isoformat()}
-        return NotificationAttempt(id=row.id, organization_id=row.organization_id, incident_id=row.incident_id, channel=row.channel, status=row.status, created_at=self._ensure_aware_utc(row.created_at, default_now=True), payload=payload)
+            processed_at = self._ensure_aware_utc(row.processed_at)
+            assert processed_at is not None
+            payload = {**payload, "processed_at": processed_at.isoformat()}
+        created_at = self._ensure_aware_utc(row.created_at, default_now=True)
+        assert created_at is not None
+        return NotificationAttempt(id=row.id, organization_id=row.organization_id, incident_id=row.incident_id, channel=row.channel, status=row.status, created_at=created_at, payload=payload)
 
     def notifications(self, organization_id: str, incident_id: str) -> list[NotificationAttempt]:
         if self.session_factory is None or select is None:
@@ -172,6 +204,15 @@ class SqlAlchemyIncidentRepository:
             if status is not None:
                 stmt = stmt.where(NotificationRow.status == status)
             return [self._notification_to_domain(row) for row in session.execute(stmt).scalars().all()]
+
+    def list_notification_organizations(self, status: str | None = None) -> list[str]:
+        if self.session_factory is None or select is None:
+            return []
+        stmt = select(NotificationRow.organization_id).distinct()
+        if status is not None:
+            stmt = stmt.where(NotificationRow.status == status)
+        with self.session_factory() as session:
+            return sorted({row[0] for row in session.execute(stmt).all() if row and row[0]})
 
     def update_notification_status(self, notification_id: str, status: str, *, processed_at: datetime | None = None, error: str | None = None) -> NotificationAttempt:
         with self.session_factory() as session:
@@ -209,14 +250,38 @@ class SqlAlchemyIncidentRepository:
         if self.session_factory is None or select is None:
             return []
         with self.session_factory() as session:
+            stmt = select(IncidentRow).where(IncidentRow.organization_id == organization_id).order_by(IncidentRow.created_at.desc(), IncidentRow.id.desc())
             items: list[Incident] = []
-            for row in session.execute(select(IncidentRow).where(IncidentRow.organization_id == organization_id)).scalars().all():
+            for row in session.execute(stmt).scalars().all():
                 incident = self._to_domain(row)
                 if incident is not None:
                     items.append(incident)
             return items
 
-    def list_filtered(self, organization_id: str, **filters) -> list[Incident]:
+    def count_filtered(self, organization_id: str, **filters) -> int:
+        if self.session_factory is None or select is None:
+            return 0
+        from sqlalchemy import func  # type: ignore[import-not-found]
+
+        stmt = select(func.count()).select_from(IncidentRow).where(IncidentRow.organization_id == organization_id)
+        if filters.get("status"):
+            stmt = stmt.where(IncidentRow.status == filters["status"])
+        if filters.get("site_id"):
+            stmt = stmt.where(IncidentRow.site_id == filters["site_id"])
+        if filters.get("camera_id"):
+            stmt = stmt.where(IncidentRow.camera_id == filters["camera_id"])
+        if filters.get("zone_id"):
+            stmt = stmt.where(IncidentRow.zone_id == filters["zone_id"])
+        if filters.get("severity"):
+            stmt = stmt.where(IncidentRow.severity == filters["severity"])
+        if filters.get("created_from"):
+            stmt = stmt.where(IncidentRow.created_at >= filters["created_from"])
+        if filters.get("created_to"):
+            stmt = stmt.where(IncidentRow.created_at <= filters["created_to"])
+        with self.session_factory() as session:
+            return int(session.execute(stmt).scalar_one())
+
+    def list_filtered(self, organization_id: str, limit: int | None = None, offset: int = 0, **filters) -> list[Incident]:
         if self.session_factory is None or select is None:
             return []
         stmt = select(IncidentRow).where(IncidentRow.organization_id == organization_id)
@@ -234,6 +299,11 @@ class SqlAlchemyIncidentRepository:
             stmt = stmt.where(IncidentRow.created_at >= filters["created_from"])
         if filters.get("created_to"):
             stmt = stmt.where(IncidentRow.created_at <= filters["created_to"])
+        stmt = stmt.order_by(IncidentRow.created_at.desc(), IncidentRow.id.desc())
+        if offset:
+            stmt = stmt.offset(max(0, offset))
+        if limit is not None:
+            stmt = stmt.limit(max(0, limit))
         with self.session_factory() as session:
             items: list[Incident] = []
             for row in session.execute(stmt).scalars().all():
@@ -290,7 +360,8 @@ class SqlAlchemyIncidentRepository:
         from .models import IncidentAuditLog as IncidentAuditLogRow
         with self.session_factory() as session:
             items: list[AuditLogEntry] = []
-            for row in session.execute(select(IncidentAuditLogRow).where(IncidentAuditLogRow.organization_id == organization_id, IncidentAuditLogRow.incident_id == incident_id)).scalars().all():
+            stmt = select(IncidentAuditLogRow).where(IncidentAuditLogRow.organization_id == organization_id, IncidentAuditLogRow.incident_id == incident_id).order_by(IncidentAuditLogRow.created_at.asc(), IncidentAuditLogRow.id.asc())
+            for row in session.execute(stmt).scalars().all():
                 items.append(AuditLogEntry(id=row.id, organization_id=row.organization_id, incident_id=row.incident_id, action=row.action, from_status=row.from_status, to_status=row.to_status, actor=row.actor, created_at=self._ensure_aware_utc(row.created_at, default_now=True) or datetime.now(timezone.utc), metadata=json.loads(row.metadata_json or "{}")))
             return items
 
@@ -362,7 +433,8 @@ class SqlAlchemyEvidenceRepository:
             return []
         with self.session_factory() as session:
             items = []
-            for row in session.execute(select(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id)).scalars().all():
+            stmt = select(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id).order_by(EvidenceMetadataRow.created_at.desc(), EvidenceMetadataRow.id.desc())
+            for row in session.execute(stmt).scalars().all():
                 evidence = self._to_domain(row)
                 if evidence is not None:
                     items.append(evidence)
@@ -373,11 +445,37 @@ class SqlAlchemyEvidenceRepository:
             return []
         with self.session_factory() as session:
             items = []
-            for row in session.execute(select(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id, EvidenceMetadataRow.incident_id == incident_id)).scalars().all():
+            stmt = select(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id, EvidenceMetadataRow.incident_id == incident_id).order_by(EvidenceMetadataRow.created_at.desc(), EvidenceMetadataRow.id.desc())
+            for row in session.execute(stmt).scalars().all():
                 evidence = self._to_domain(row)
                 if evidence is not None:
                     items.append(evidence)
             return items
+
+    def count_by_organization(self, organization_id: str, incident_id: str | None = None) -> int:
+        if self.session_factory is None or select is None:
+            return 0
+        from sqlalchemy import func  # type: ignore[import-not-found]
+
+        stmt = select(func.count()).select_from(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id)
+        if incident_id is not None:
+            stmt = stmt.where(EvidenceMetadataRow.incident_id == incident_id)
+        with self.session_factory() as session:
+            return int(session.execute(stmt).scalar_one())
+
+    def list_paginated(self, organization_id: str, incident_id: str | None = None, limit: int | None = None, offset: int = 0):
+        if self.session_factory is None or select is None:
+            return []
+        stmt = select(EvidenceMetadataRow).where(EvidenceMetadataRow.organization_id == organization_id)
+        if incident_id is not None:
+            stmt = stmt.where(EvidenceMetadataRow.incident_id == incident_id)
+        stmt = stmt.order_by(EvidenceMetadataRow.created_at.desc(), EvidenceMetadataRow.id.desc())
+        if offset:
+            stmt = stmt.offset(max(0, offset))
+        if limit is not None:
+            stmt = stmt.limit(max(0, limit))
+        with self.session_factory() as session:
+            return [evidence for evidence in (self._to_domain(row) for row in session.execute(stmt).scalars().all()) if evidence is not None]
 
     def mark_deleted(self, organization_id: str, incident_id: str, file_id: str, deleted_at: datetime | None = None) -> None:
         if self.session_factory is None:

@@ -123,6 +123,31 @@ def check_redis_connection(settings_obj: object = settings) -> DependencyCheckRe
         return DependencyCheckResult(ok=False, configured=True, sanitized_url=result.sanitized_url, error=str(exc))
 
 
+def _is_local_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local")
+
+
+def _validate_probe_url(url: str, settings_obj: object) -> tuple[bool, str | None]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False, "unsupported minio endpoint scheme"
+    if parsed.username or parsed.password:
+        return False, "minio endpoint credentials are not allowed"
+    host = parsed.hostname
+    if not host:
+        return False, "minio endpoint host not configured"
+    trusted_host = urlparse(getattr(settings_obj, "minio_endpoint", None) or getattr(settings_obj, "s3_public_endpoint_url", None) or url).hostname
+    allow_internal = bool(getattr(settings_obj, "allow_internal_s3_endpoint", False))
+    if host == trusted_host:
+        return True, None
+    if allow_internal and _is_local_host(host):
+        return True, None
+    return False, "minio endpoint host not allowed"
+
+
 def check_minio_connection(settings_obj: object = settings) -> DependencyCheckResult:
     url = getattr(settings_obj, "s3_endpoint_url", None) or getattr(settings_obj, "minio_endpoint", None)
     sanitized = sanitize_database_url(url)
@@ -136,9 +161,12 @@ def check_minio_connection(settings_obj: object = settings) -> DependencyCheckRe
             return DependencyCheckResult(ok=ok, configured=True, sanitized_url=sanitized, error=None if ok else "minio probe failed")
         except Exception as exc:  # pragma: no cover - defensive
             return DependencyCheckResult(ok=False, configured=True, sanitized_url=sanitized, error=str(exc))
+    ok, reason = _validate_probe_url(url, settings_obj)
+    if not ok:
+        return DependencyCheckResult(ok=False, configured=True, sanitized_url=sanitized, error=reason)
     try:
         health_url = f"{url.rstrip('/')}/minio/health/live"
-        with urlopen(health_url, timeout=2) as response:  # nosec B310 - dev health probe URL comes from settings
+        with urlopen(health_url, timeout=2) as response:  # nosec B310 - URL is validated above
             ok = 200 <= response.status < 300
         return DependencyCheckResult(ok=ok, configured=True, sanitized_url=sanitized, error=None if ok else "minio health probe failed")
     except Exception as exc:  # pragma: no cover - depends on runtime services

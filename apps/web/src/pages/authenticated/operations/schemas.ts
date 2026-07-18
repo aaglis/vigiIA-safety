@@ -21,19 +21,29 @@ export const siteFormSchema = z.object({
 // Em dev a API ainda aceita arquivo, mas o formulário ensina o formato de produção.
 const STREAM_URL = /^(rtsp|rtmp):\/\/[^\s/]+(\/[^\s]*)?$/i
 
+function validateStreamUrl(value: string, ctx: z.RefinementCtx, options: { required: boolean }) {
+  const url = (value ?? '').trim()
+  if (!url) {
+    if (options.required) ctx.addIssue({ code: 'custom', message: 'Informe a URL do stream.' })
+    return
+  }
+  if (!STREAM_URL.test(url)) {
+    ctx.addIssue({ code: 'custom', message: 'Use uma URL de câmera ao vivo, como rtsp://10.0.0.20:554/live.' })
+  }
+}
+
 export const cameraFormSchema = z.object({
   site_id: z.string().min(1, 'Escolha a unidade.'),
   name: z.string().trim().min(2, 'Informe o nome da câmera (mínimo 2 caracteres).').max(120, 'Nome muito longo.'),
-  stream_identifier: z.string().superRefine((value, ctx) => {
-    const url = (value ?? '').trim()
-    if (!url) {
-      ctx.addIssue({ code: 'custom', message: 'Informe a URL do stream.' })
-      return
-    }
-    if (!STREAM_URL.test(url)) {
-      ctx.addIssue({ code: 'custom', message: 'Use uma URL de câmera ao vivo, como rtsp://10.0.0.20:554/live.' })
-    }
-  }),
+  stream_identifier: z.string().superRefine((value, ctx) => validateStreamUrl(value, ctx, { required: true })),
+  status,
+})
+
+export const cameraEditFormSchema = z.object({
+  site_id: z.string().min(1, 'Escolha a unidade.'),
+  name: z.string().trim().min(2, 'Informe o nome da câmera (mínimo 2 caracteres).').max(120, 'Nome muito longo.'),
+  // Em edição, vazio significa manter a URL secreta que o frontend não recebe.
+  stream_identifier: z.string().superRefine((value, ctx) => validateStreamUrl(value, ctx, { required: false })),
   status,
 })
 

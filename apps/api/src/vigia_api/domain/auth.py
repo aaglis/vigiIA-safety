@@ -29,7 +29,7 @@ class OrganizationSummary:
 class MembershipSummary:
     organization: OrganizationSummary
     role: str
-    permissions: list[Permission] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
     active: bool = False
 
 

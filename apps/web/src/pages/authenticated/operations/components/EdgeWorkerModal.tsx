@@ -176,7 +176,7 @@ export function EdgeWorkerModal({
                           />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate font-medium text-[var(--ink)]">{camera.name}</span>
-                            <span className="block truncate text-xs text-[var(--muted-2)]">{site?.name ?? camera.site_id} · {camera.stream_identifier}</span>
+                            <span className="block truncate text-xs text-[var(--muted-2)]">{site?.name ?? camera.site_id} · {camera.display_stream_identifier ?? 'Fonte configurada'}</span>
                           </span>
                         </label>
                       )

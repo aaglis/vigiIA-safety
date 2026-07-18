@@ -2,21 +2,7 @@ from __future__ import annotations
 
 import logging
 from urllib.parse import urlparse
-from typing import TYPE_CHECKING, Any
-
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import HTTPException, Request
-except Exception:  # pragma: no cover
-    class HTTPException(Exception):
-        def __init__(self, status_code: int, detail: str) -> None:
-            super().__init__(detail)
-            self.status_code = status_code
-            self.detail = detail
-
-    if TYPE_CHECKING:
-        from fastapi import Request
-    else:
-        Request = Any  # type: ignore[assignment]
+from fastapi import HTTPException, Request
 
 from ..settings import settings
 

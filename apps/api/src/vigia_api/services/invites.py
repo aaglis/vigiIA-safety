@@ -3,20 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from ..domain.auth import MembershipSummary, OrganizationSummary, Permission, User
+from ..domain.auth import User
 from ..domain.invites import InviteStatus, OrganizationInvite, QueuedEmail
 from typing import Any
 
 from .auth import InMemoryAuthRepository
 from .security import generate_token, hash_password, hash_token
 from ..security.permissions import has_permission
-
-
-ROLE_DEFAULT_PERMISSIONS = {
-    "org_admin": [Permission.VIEW_DASHBOARD, Permission.MANAGE_USERS, Permission.MANAGE_ORG],
-    "manager": [Permission.VIEW_DASHBOARD],
-    "auditor_viewer": [Permission.VIEW_DASHBOARD],
-}
 
 
 class InMemoryInviteRepository:
@@ -120,7 +113,7 @@ class InviteService:
         if not user:
             user = User(id=uuid4().hex, email=email.lower(), full_name=full_name, password_hash=hash_password(password or generate_token(16)))
             self.auth_repository.add_user(user)
-        self.auth_repository.add_membership(invite.organization_id, user.id, invite.role, ROLE_DEFAULT_PERMISSIONS.get(invite.role, [Permission.VIEW_DASHBOARD]))
+        self.auth_repository.add_membership(invite.organization_id, user.id, invite.role)
         invite.status = InviteStatus.ACCEPTED
         invite.accepted_at = now
         invite.accepted_by_user_id = user.id

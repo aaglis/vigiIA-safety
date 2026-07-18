@@ -1,54 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
+import { useLocation, useNavigate } from '@tanstack/react-router'
 import type { MeResponse } from './api/auth'
 import { login, me } from './api/auth'
-import { ApiError, isApiError, isSessionError } from './api/client'
-import type { OperationCatalog, OperationEntityStatus, OperationZoneType } from './api/operations'
-import { getCameraLiveTicket, getOperationsCatalog } from './api/operations'
-import { captureLiveFrame } from './components/operations/whep'
+import { isSessionError } from './api/client'
 import type { AuditLogEntry, Incident, IncidentStatus } from './api/incidents'
 import { acknowledgeIncident, dismissIncident, getIncident, getIncidentAuditLog, listIncidents, resolveIncident } from './api/incidents'
 import type { EvidenceItem } from './api/evidence'
 import { getEvidenceDownloadUrl, listEvidence } from './api/evidence'
-import { getCurrentEdgeWorkerConfig, registerEdgeWorker } from './api/edgeWorkers'
-import { demoEmail, demoPassword, demoState, demoEvidenceByIncident, demoOperationsCatalog, demoOrganization } from './demo/fixtures'
+import type { PageInfo } from './api/types'
+import { demoEmail, demoPassword, demoState, demoEvidenceByIncident, demoOrganization } from './demo/fixtures'
 import { queryKeys } from './api/queryKeys'
-import { OverviewPage } from './pages/authenticated/OverviewPage'
-import type { OverviewSite } from './pages/authenticated/OverviewPage'
-import { EvidencePage } from './pages/authenticated/EvidencePage'
-import { AuditPage } from './pages/authenticated/AuditPage'
-import { IncidentsPage } from './pages/authenticated/IncidentsPage'
-import { SettingsPage } from './pages/authenticated/SettingsPage'
-import { OrganizationsPage } from './pages/authenticated/OrganizationsPage'
-import { UsersPage } from './pages/authenticated/UsersPage'
-import { Icon } from './components/ui/icons'
-import type { IconName } from './components/ui/icons'
-import { useEdgeWorkers, useOperationMutations } from './queries/hooks'
-import { type AppSection, type Screen, normalizePathname, resolveRoute, routeForCamera, routeForSection, routeForSite } from './navigation/routes'
-import { OperationsProvider, type OperationsContextValue } from './pages/authenticated/operations/OperationsContext'
-import { formatAgoShort, formatBytes, formatClock, formatTimestamp, initialsFrom, normalizeApiError, readMetadataValueFromUnknown, selectOrganization, shortHash } from './utils/formatters'
-import { EvidenceExplorer } from './components/evidence/EvidenceExplorer'
-import { Sidebar } from './components/workspace/Sidebar'
-import { LandingPage } from './pages/public/LandingPage'
-import { LoginPage } from './pages/public/LoginPage'
-import {
-  AUDIT_ACTION_LABEL,
-  ENTITY_STATUS_BADGE,
-  STATUS_CHIP,
-  ZONE_TYPE_BADGE,
-  auditActionDot,
-  auditActionLabel,
-  labelOperationStatus,
-  labelZoneType,
-  ruleSeverityBadge,
-  severityMeta,
-} from './components/status/status'
+import { type AppSection, normalizePathname, resolveRoute, routeForCamera, routeForSection, routeForSite } from './navigation/routes'
+import { initialsFrom, normalizeApiError, selectOrganization } from './utils/formatters'
+import { SessionFrame } from './session/SessionFrame'
+import { DashboardLayout } from './workspace/DashboardLayout'
+import { WorkspaceContent } from './workspace/WorkspaceContent'
+import { useOperationsController } from './workspace/useOperationsController'
 import {
   type IncidentFilters,
-  type IncidentPeriod,
   defaultIncidentFilters,
-  formatDateInput,
   incidentFiltersToParams,
   incidentMatchesFilters,
   normalizeIncidentFilters,
@@ -59,6 +30,8 @@ type ConnectionMode = 'live' | 'demo' | null
 
 // Intervalo do refresh automático de incidentes, em ms. 0 (ou negativo) desliga.
 const incidentRefreshIntervalMs = Number(import.meta.env.VITE_INCIDENT_REFRESH_MS ?? 8000)
+const incidentPageSize = 50
+const evidencePageSize = 50
 
 
 export default function App() {
@@ -79,27 +52,25 @@ export default function App() {
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([])
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dashboardError, setDashboardError] = useState<string | null>(null)
-  const [operationsCatalog, setOperationsCatalog] = useState<OperationCatalog | null>(null)
-  const [operationsLoading, setOperationsLoading] = useState(false)
-  const [operationsError, setOperationsError] = useState<string | null>(null)
   const [incidentFilters, setIncidentFilters] = useState<IncidentFilters>(() => readIncidentFiltersFromUrl())
   const [actionBusy, setActionBusy] = useState<'acknowledge' | 'resolve' | 'dismiss' | null>(null)
   const [incidentQuery, setIncidentQuery] = useState('')
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null)
+  const [incidentPageInfo, setIncidentPageInfo] = useState<PageInfo | null>(null)
+  const [incidentLoadingMore, setIncidentLoadingMore] = useState(false)
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
+  const [evidencePageInfo, setEvidencePageInfo] = useState<PageInfo | null>(null)
+  const [evidenceLoadingMore, setEvidenceLoadingMore] = useState(false)
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [evidenceError, setEvidenceError] = useState<string | null>(null)
   const [evidenceDownloadUrl, setEvidenceDownloadUrl] = useState<string | null>(null)
   const [evidenceDownloadLoading, setEvidenceDownloadLoading] = useState(false)
   const [evidenceDownloadError, setEvidenceDownloadError] = useState<string | null>(null)
   const incidentRequestIdRef = useRef(0)
+  const incidentListRequestIdRef = useRef(0)
 
   const activeOrganization = useMemo(() => (meData ? selectOrganization(meData) : null), [meData])
-  const operationMutations = useOperationMutations(activeOrganization?.id ?? null)
-  // Inventário real de workers (com telemetria). Antes a aba Workers só via o que fosse
-  // registrado na própria sessão, então worker provisionado antes nunca aparecia.
-  const edgeWorkersQuery = useEdgeWorkers(activeOrganization?.id ?? null, mode === 'live')
   const selectedIncident = useMemo(() => incidents.find((incident) => incident.id === selectedIncidentId) ?? null, [incidents, selectedIncidentId])
   const selectedEvidence = useMemo(
     () => evidenceItems.find((evidence) => evidence.file_id === selectedEvidenceId) ?? evidenceItems[0] ?? null,
@@ -108,14 +79,6 @@ export default function App() {
   const route = useMemo(() => resolveRoute(location.pathname), [location.pathname])
   const screen = route.screen
   const workspaceSection = route.section
-  const operationSites = operationsCatalog?.sites ?? []
-  const operationCameras = operationsCatalog?.cameras ?? []
-  const operationZones = operationsCatalog?.zones ?? []
-  const operationRules = operationsCatalog?.safety_rules ?? []
-  const operationPpe = operationsCatalog?.required_ppe ?? []
-  const filteredSiteOptions = operationSites.map((site) => ({ id: site.id, name: site.name }))
-  const filteredCameraOptions = incidentFilters.siteId === 'all' ? operationCameras : operationCameras.filter((camera) => camera.site_id === incidentFilters.siteId)
-  const filteredZoneOptions = (incidentFilters.siteId === 'all' ? operationZones : operationZones.filter((zone) => zone.site_id === incidentFilters.siteId)).map((zone) => ({ id: zone.id, name: zone.id }))
   const hasActiveIncidentFilters = incidentFilters.status !== 'all'
     || incidentFilters.severity !== 'all'
     || incidentFilters.siteId !== 'all'
@@ -164,13 +127,15 @@ export default function App() {
     setMode(null)
     setMeData(null)
     setIncidents([])
-    setOperationsCatalog(null)
+    setIncidentPageInfo(null)
+    setIncidentLoadingMore(false)
+    resetOperations()
     setSelectedIncidentId(null)
     setAuditLog([])
-    setOperationsLoading(false)
-    setOperationsError(null)
     setEvidenceItems([])
     setSelectedEvidenceId(null)
+    setEvidencePageInfo(null)
+    setEvidenceLoadingMore(false)
     setEvidenceLoading(false)
     setEvidenceError(null)
     setEvidenceDownloadUrl(null)
@@ -178,12 +143,16 @@ export default function App() {
     setEvidenceDownloadError(null)
     setDashboardError(null)
     setMobileNavOpen(false)
+    incidentRequestIdRef.current += 1
+    incidentListRequestIdRef.current += 1
   }
 
   const clearIncidentDetailState = () => {
     setAuditLog([])
     setEvidenceItems([])
     setSelectedEvidenceId(null)
+    setEvidencePageInfo(null)
+    setEvidenceLoadingMore(false)
     setEvidenceLoading(false)
     setEvidenceError(null)
     setEvidenceDownloadUrl(null)
@@ -201,6 +170,7 @@ export default function App() {
 
     const normalizedFilters = normalizeIncidentFilters(nextFilters)
     writeIncidentFiltersToUrl(normalizedFilters)
+    incidentListRequestIdRef.current += 1
 
     const currentRequestId = ++incidentRequestIdRef.current
     const previousSelectedId = selectedIncidentId
@@ -213,6 +183,7 @@ export default function App() {
     try {
       if (mode === 'demo') {
         const demoIncidents = demoState.incidents.filter((incident) => incidentMatchesFilters(incident, normalizedFilters))
+        const demoPageInfo: PageInfo = { limit: incidentPageSize, offset: 0, total: demoIncidents.length, has_next: false }
         const nextSelectedId = previousSelectedId && demoIncidents.some((incident) => incident.id === previousSelectedId)
           ? previousSelectedId
           : shouldResetSelection
@@ -223,7 +194,11 @@ export default function App() {
                 ? null
                 : demoIncidents[0]?.id ?? null
 
+        if (currentRequestId !== incidentRequestIdRef.current) return
+
         setIncidents(demoIncidents)
+        setIncidentPageInfo(demoPageInfo)
+        setIncidentLoadingMore(false)
         setMode('demo')
         setMeData(meResponse)
         setSelectedIncidentId(nextSelectedId)
@@ -239,8 +214,8 @@ export default function App() {
       }
 
       const response = await queryClient.fetchQuery({
-        queryKey: queryKeys.incidents(organization.id, { limit: 50, offset: 0, ...incidentFiltersToParams(normalizedFilters) }),
-        queryFn: () => listIncidents(organization.id, { limit: 50, offset: 0, ...incidentFiltersToParams(normalizedFilters) }),
+        queryKey: queryKeys.incidents(organization.id, { limit: incidentPageSize, offset: 0, ...incidentFiltersToParams(normalizedFilters) }),
+        queryFn: () => listIncidents(organization.id, { limit: incidentPageSize, offset: 0, ...incidentFiltersToParams(normalizedFilters) }),
         staleTime: 10_000,
       })
 
@@ -260,6 +235,8 @@ export default function App() {
       setMode('live')
       setMeData(meResponse)
       setIncidents(items)
+      setIncidentPageInfo(response.page_info)
+      setIncidentLoadingMore(false)
       setSelectedIncidentId(nextSelectedId)
       setBanner(null)
 
@@ -291,21 +268,60 @@ export default function App() {
     }
   }
 
+  const loadMoreIncidents = async () => {
+    if (!activeOrganization || mode !== 'live' || !incidentPageInfo?.has_next || incidentLoadingMore) return
+
+    const currentRequestId = ++incidentListRequestIdRef.current
+    const normalizedFilters = normalizeIncidentFilters(incidentFilters)
+    const nextOffset = incidentPageInfo.offset + incidentPageInfo.limit
+
+    setIncidentLoadingMore(true)
+
+    try {
+      const params = { limit: incidentPageSize, offset: nextOffset, ...incidentFiltersToParams(normalizedFilters) }
+      const response = await queryClient.fetchQuery({
+        queryKey: queryKeys.incidents(activeOrganization.id, params),
+        queryFn: () => listIncidents(activeOrganization.id, params),
+        staleTime: 10_000,
+      })
+      if (currentRequestId !== incidentListRequestIdRef.current) return
+      const items = response.items ?? []
+      setIncidents((current) => [...current, ...items])
+      setIncidentPageInfo(response.page_info)
+    } catch (error) {
+      if (isSessionError(error)) {
+        expireSession()
+        return
+      }
+      setDashboardError(`Não foi possível carregar mais incidentes: ${normalizeApiError(error)}`)
+    } finally {
+      if (currentRequestId === incidentListRequestIdRef.current) {
+        setIncidentLoadingMore(false)
+      }
+    }
+  }
+
   const activateDemo = (reason?: string) => {
+    incidentRequestIdRef.current += 1
+    incidentListRequestIdRef.current += 1
     const demoIncidents = demoState.incidents.filter((incident) => incidentMatchesFilters(incident, incidentFilters))
     const selectedId = demoIncidents[0]?.id ?? null
     const demoEvidence = selectedId ? demoEvidenceByIncident[selectedId] ?? { items: [], previewUrls: {} } : { items: [], previewUrls: {} }
+    const demoIncidentPageInfo: PageInfo = { limit: incidentPageSize, offset: 0, total: demoIncidents.length, has_next: false }
+    const demoEvidencePageInfo: PageInfo = { limit: evidencePageSize, offset: 0, total: demoEvidence.items.length, has_next: false }
 
     setMode('demo')
     setMeData(demoState.me)
     setIncidents(demoIncidents)
-    setOperationsCatalog(demoOperationsCatalog)
+    setIncidentPageInfo(demoIncidentPageInfo)
+    setIncidentLoadingMore(false)
+    activateDemoOperations()
     setSelectedIncidentId(selectedId)
     setAuditLog(selectedId ? demoState.auditLogs[selectedId] ?? [] : [])
     setEvidenceItems(demoEvidence.items)
+    setEvidencePageInfo(demoEvidencePageInfo)
+    setEvidenceLoadingMore(false)
     setSelectedEvidenceId(demoEvidence.items[0]?.file_id ?? null)
-    setOperationsLoading(false)
-    setOperationsError(null)
     setEvidenceLoading(false)
     setEvidenceError(null)
     setEvidenceDownloadUrl(null)
@@ -334,32 +350,14 @@ export default function App() {
   const hydrateLiveDashboard = async (meResponse: MeResponse, preferredIncidentId?: string) => {
     const organization = selectOrganization(meResponse)
     if (!organization) {
-      setOperationsError('Nenhuma organização ativa encontrada.')
+      setDashboardError('Nenhuma organização ativa encontrada.')
       setBooting(false)
       return
     }
 
-    setOperationsLoading(true)
-    setOperationsError(null)
     try {
-      const operationsResult = await queryClient.fetchQuery({
-        queryKey: queryKeys.operationsCatalog(organization.id),
-        queryFn: () => getOperationsCatalog(organization.id),
-        staleTime: 30_000,
-      }).then(
-        (result) => ({ status: 'fulfilled' as const, value: result }),
-        (reason) => ({ status: 'rejected' as const, reason }),
-      )
-
-      if (operationsResult.status === 'fulfilled') {
-        setOperationsCatalog(operationsResult.value)
-      } else if (isSessionError(operationsResult.reason)) {
-        expireSession()
-        return
-      } else {
-        setOperationsCatalog(null)
-        setOperationsError(`Não foi possível carregar a configuração operacional: ${normalizeApiError(operationsResult.reason)}`)
-      }
+      const operationsLoaded = await loadOperationsCatalog(organization.id)
+      if (!operationsLoaded) return
       await refreshIncidentList(meResponse, incidentFilters, preferredIncidentId ?? null)
       // Não sequestrar a rota: quem abriu/recarregou um link fundo (a página de uma câmera,
       // por exemplo) fica onde pediu. Só manda para o dashboard quem chegou sem destino.
@@ -371,81 +369,30 @@ export default function App() {
         expireSession()
         return
       }
-      setOperationsError(`Não foi possível carregar a configuração operacional: ${normalizeApiError(error)}`)
-    } finally {
-      setOperationsLoading(false)
+      setDashboardError(`Não foi possível carregar o dashboard: ${normalizeApiError(error)}`)
     }
   }
-
-  const reloadOperationsCatalog = async () => {
-    if (!activeOrganization) return
-    const catalog = await queryClient.fetchQuery({
-      queryKey: queryKeys.operationsCatalog(activeOrganization.id),
-      queryFn: () => getOperationsCatalog(activeOrganization.id),
-      staleTime: 0,
-    })
-    setOperationsCatalog(catalog)
-  }
-
-  // Busca um frame real da câmera para servir de fundo ao editor de zona: pega a
-  // evidência mais recente entre os últimos incidentes daquela câmera. Sem incidente
-  // com evidência ainda, devolve null e o editor mostra o estado vazio.
-  const requestLiveTicket = useCallback(async (cameraId: string): Promise<{ whep_url: string } | null> => {
-    if (mode !== 'live' || !activeOrganization) return null
-    try {
-      return await getCameraLiveTicket(activeOrganization.id, cameraId)
-    } catch (error) {
-      if (isSessionError(error)) expireSession()
-      return null
-    }
-  }, [activeOrganization, mode])
-
-  // Fundo do editor de zona: primeiro tenta congelar um frame da câmera AO VIVO (funciona
-  // em câmera recém-cadastrada, sem incidente algum, e não passa pelo cloud). Só se a
-  // câmera estiver offline cai para a última evidência registrada.
-  const loadCameraFrame = useCallback(async (cameraId: string): Promise<string | null> => {
-    if (mode !== 'live' || !activeOrganization) return null
-    try {
-      const ticket = await getCameraLiveTicket(activeOrganization.id, cameraId).catch(() => null)
-      if (ticket?.whep_url) {
-        const frame = await captureLiveFrame(ticket.whep_url)
-        if (frame) return frame
-      }
-    } catch (error) {
-      if (isSessionError(error)) expireSession()
-    }
-    try {
-      const response = await listIncidents(activeOrganization.id, { limit: 5, offset: 0, camera_id: cameraId })
-      for (const incident of response.items ?? []) {
-        const evidence = await listEvidence(activeOrganization.id, incident.id)
-        const snapshot = (evidence.items ?? []).find((item) => item.media_type?.startsWith('image/')) ?? (evidence.items ?? [])[0]
-        if (!snapshot) continue
-        const download = await getEvidenceDownloadUrl(activeOrganization.id, incident.id, snapshot.file_id)
-        if (download.download_url) return download.download_url
-      }
-    } catch (error) {
-      if (isSessionError(error)) expireSession()
-    }
-    return null
-  }, [activeOrganization, mode])
 
   // Atualiza só a lista de incidentes, sem tocar em seleção, loading ou URL: o refresh
   // automático não pode puxar o tapete de quem está triando um incidente.
   const refreshIncidentsInBackground = useCallback(async () => {
     if (mode !== 'live' || !activeOrganization) return
-    const params = { limit: 50, offset: 0, ...incidentFiltersToParams(normalizeIncidentFilters(incidentFilters)) }
+    const currentRequestId = ++incidentListRequestIdRef.current
+    const params = { limit: Math.max(incidents.length, incidentPageSize), offset: 0, ...incidentFiltersToParams(normalizeIncidentFilters(incidentFilters)) }
     try {
       const response = await queryClient.fetchQuery({
         queryKey: queryKeys.incidents(activeOrganization.id, params),
         queryFn: () => listIncidents(activeOrganization.id, params),
         staleTime: 0,
       })
+      if (currentRequestId !== incidentListRequestIdRef.current) return
       setIncidents(response.items ?? [])
+      setIncidentPageInfo(response.page_info)
     } catch (error) {
       if (isSessionError(error)) expireSession()
       // Demais falhas ficam silenciosas: refresh de fundo não deve poluir a tela com erro.
     }
-  }, [activeOrganization, incidentFilters, mode, queryClient])
+  }, [activeOrganization, incidentFilters, incidents.length, mode, queryClient])
 
   useEffect(() => {
     if (mode !== 'live' || incidentRefreshIntervalMs <= 0) return
@@ -484,6 +431,8 @@ export default function App() {
       setAuditLog(demoState.auditLogs[incidentId] ?? [])
       const demoEvidence = demoEvidenceByIncident[incidentId] ?? { items: [], previewUrls: {} }
       setEvidenceItems(demoEvidence.items)
+      setEvidencePageInfo({ limit: evidencePageSize, offset: 0, total: demoEvidence.items.length, has_next: false })
+      setEvidenceLoadingMore(false)
       setSelectedEvidenceId(demoEvidence.items[0]?.file_id ?? null)
       setEvidenceLoading(false)
       setEvidenceError(null)
@@ -523,19 +472,23 @@ export default function App() {
     setEvidenceError(null)
     setEvidenceDownloadError(null)
     setEvidenceDownloadUrl(null)
+    setEvidencePageInfo(null)
+    setEvidenceLoadingMore(false)
 
     try {
       if (mode === 'demo') {
         const demoEvidence = demoEvidenceByIncident[incidentId] ?? { items: [], previewUrls: {} }
         setEvidenceItems(demoEvidence.items)
+        setEvidencePageInfo({ limit: evidencePageSize, offset: 0, total: demoEvidence.items.length, has_next: false })
         setSelectedEvidenceId(demoEvidence.items[0]?.file_id ?? null)
         return
       }
 
-      const response = await queryClient.fetchQuery({ queryKey: queryKeys.evidence(organizationId, incidentId), queryFn: () => listEvidence(organizationId, incidentId), staleTime: 10_000 })
+      const response = await queryClient.fetchQuery({ queryKey: queryKeys.evidence(organizationId, incidentId, { limit: evidencePageSize, offset: 0 }), queryFn: () => listEvidence(organizationId, incidentId, { limit: evidencePageSize, offset: 0 }), staleTime: 10_000 })
       if (requestId !== undefined && requestId !== incidentRequestIdRef.current) return
       const items = response.items ?? []
       setEvidenceItems(items)
+      setEvidencePageInfo(response.page_info)
       setSelectedEvidenceId(items[0]?.file_id ?? null)
     } catch (error) {
       if (isSessionError(error)) {
@@ -544,10 +497,43 @@ export default function App() {
       }
       setEvidenceItems([])
       setSelectedEvidenceId(null)
+      setEvidencePageInfo(null)
       setEvidenceError(`Não foi possível carregar as evidências: ${normalizeApiError(error)}`)
     } finally {
       if (requestId === undefined || requestId === incidentRequestIdRef.current) {
         setEvidenceLoading(false)
+      }
+    }
+  }
+
+  const loadMoreEvidence = async () => {
+    if (!activeOrganization || !selectedIncident || mode !== 'live' || !evidencePageInfo?.has_next || evidenceLoadingMore) return
+
+    const requestId = incidentRequestIdRef.current
+    const nextOffset = evidencePageInfo.offset + evidencePageInfo.limit
+
+    setEvidenceLoadingMore(true)
+
+    try {
+      const params = { limit: evidencePageSize, offset: nextOffset }
+      const response = await queryClient.fetchQuery({
+        queryKey: queryKeys.evidence(activeOrganization.id, selectedIncident.id, params),
+        queryFn: () => listEvidence(activeOrganization.id, selectedIncident.id, params),
+        staleTime: 10_000,
+      })
+      if (requestId !== incidentRequestIdRef.current) return
+      const items = response.items ?? []
+      setEvidenceItems((current) => [...current, ...items])
+      setEvidencePageInfo(response.page_info)
+    } catch (error) {
+      if (isSessionError(error)) {
+        expireSession()
+        return
+      }
+      setEvidenceError(`Não foi possível carregar mais evidências: ${normalizeApiError(error)}`)
+    } finally {
+      if (requestId === incidentRequestIdRef.current) {
+        setEvidenceLoadingMore(false)
       }
     }
   }
@@ -759,132 +745,6 @@ export default function App() {
   const avgAcknowledgementMinutes = acknowledgementDurations.length > 0
     ? Math.round(acknowledgementDurations.reduce((sum, value) => sum + value, 0) / acknowledgementDurations.length)
     : null
-  const activeCamerasCount = operationCameras.filter((camera) => camera.status === 'active').length
-  const totalCamerasCount = operationCameras.length
-  const overviewSites: OverviewSite[] = operationSites.map((site) => {
-    const siteCameras = operationCameras.filter((camera) => camera.site_id === site.id)
-    return {
-      id: site.id,
-      name: site.name,
-      cameraCount: siteCameras.length,
-      activeCameraCount: siteCameras.filter((camera) => camera.status === 'active').length,
-      status: site.status,
-    }
-  })
-
-  const renderResourcePlaceholder = (title: string, description: string, bullets: string[]) => (
-    <section className="space-y-6">
-      <div className="rounded-xl border border-[color:var(--line)] bg-[var(--card)] p-6">
-        <p className="font-mono-ui text-[11px] uppercase tracking-[0.3em] text-[var(--accent)]">{activeWorkspaceLabel}</p>
-        <h1 className="mt-3 font-display text-3xl leading-tight text-[var(--ink)] sm:text-4xl">{title}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">{description}</p>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <article className="rounded-xl border border-[color:var(--line)] bg-[var(--card)] p-6">
-          <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[var(--accent)]">Em construção</p>
-          <ul className="mt-4 space-y-3 text-sm leading-7 text-[var(--muted)]">
-            {bullets.map((bullet) => (
-              <li key={bullet} className="flex gap-3 rounded-lg border border-[color:var(--line)] bg-[var(--paper)] px-4 py-3">
-                <span className="mt-1 h-2 w-2 rounded-full bg-[var(--accent)]" />
-                <span>{bullet}</span>
-              </li>
-            ))}
-          </ul>
-        </article>
-
-        <aside className="rounded-xl border border-[color:var(--line)] bg-[var(--ink)] p-6 text-[var(--paper)]">
-          <p className="font-mono-ui text-[11px] uppercase tracking-[0.28em] text-[rgba(245,243,239,0.7)]">Contexto</p>
-          <div className="mt-4 space-y-3 text-sm leading-7 text-[rgba(245,243,239,0.84)]">
-            <p>Organização ativa: {activeOrganization?.name ?? '—'}</p>
-            <p>Usuário: {meData?.user.full_name ?? meData?.user.email ?? '—'}</p>
-            <p>Status: {liveLabel}</p>
-          </div>
-          <div className="mt-6 rounded-[10px] border border-white/10 bg-white/5 p-4 text-sm text-[rgba(245,243,239,0.74)]">
-            Este espaço já segue o shell autenticado, então quando a tela ganhar CRUD real a navegação continuará intacta.
-          </div>
-        </aside>
-      </div>
-    </section>
-  )
-
-  const renderIncidentsSection = () => (
-    <IncidentsPage
-      incidents={incidents}
-      incidentSummary={incidentSummary}
-      selectedIncident={selectedIncident}
-      selectedIncidentId={selectedIncidentId}
-      auditLog={auditLog}
-      incidentFilters={incidentFilters}
-      incidentQuery={incidentQuery}
-      hasActiveIncidentFilters={hasActiveIncidentFilters}
-      dashboardLoading={dashboardLoading}
-      dashboardError={dashboardError}
-      operationsLoading={operationsLoading}
-      operationsCatalog={operationsCatalog}
-      filteredSiteOptions={filteredSiteOptions}
-      filteredCameraOptions={filteredCameraOptions}
-      filteredZoneOptions={filteredZoneOptions}
-      connectionTone={connectionTone}
-      mode={mode}
-      actionBusy={actionBusy}
-      evidenceItemsCount={evidenceItems.length}
-      onIncidentQueryChange={setIncidentQuery}
-      onUpdateIncidentFilters={updateIncidentFilters}
-      onResetIncidentFilters={resetIncidentFilters}
-      onSelectIncident={(id) => activeOrganization && void loadIncidentContext(activeOrganization.id, id)}
-      onLoadIncidentContext={(id) => activeOrganization && void loadIncidentContext(activeOrganization.id, id)}
-      onOpenEvidence={() => void openWorkspaceSection('evidence')}
-      onHandleAction={handleAction}
-      onOpenWorkspaceSection={openWorkspaceSection}
-    />
-  )
-
-  const renderEvidenceSection = () => (
-    <EvidencePage
-      selectedIncident={selectedIncident}
-      openWorkspaceSection={openWorkspaceSection}
-      evidenceExplorer={selectedIncident ? (
-        <EvidenceExplorer
-          incident={selectedIncident}
-          organizationName={activeOrganization?.name ?? null}
-          evidenceItems={evidenceItems}
-          selectedEvidence={selectedEvidence}
-          evidenceLoading={evidenceLoading}
-          evidenceError={evidenceError}
-          evidenceDownloadUrl={evidenceDownloadUrl}
-          evidenceDownloadLoading={evidenceDownloadLoading}
-          evidenceDownloadError={evidenceDownloadError}
-          onSelectEvidence={selectEvidence}
-          onOpenEvidence={() => void openSelectedEvidence()}
-          onRetry={() => void loadEvidenceContext(activeOrganization?.id ?? selectedIncident.organization_id, selectedIncident.id)}
-        />
-      ) : null}
-    />
-  )
-
-  const renderAuditSection = () => (
-    <AuditPage
-      auditLog={auditLog}
-      selectedIncident={selectedIncident}
-      activeOrganizationName={activeOrganization?.name ?? '—'}
-      activeOrganizationId={activeOrganization?.id ?? null}
-      activePermissions={meData?.active_permissions ?? []}
-      canReadAudit={meData?.active_permissions.includes('audit.read') ?? false}
-      openWorkspaceSection={openWorkspaceSection}
-    />
-  )
-
-  const renderSettingsSection = () => (
-    <SettingsPage
-      userName={meData?.user.full_name ?? meData?.user.email ?? '—'}
-      userEmail={meData?.user.email ?? '—'}
-      organizationName={activeOrganization?.name ?? 'Organização ativa'}
-      organizationId={activeOrganization?.id ?? null}
-      activePermissions={meData?.active_permissions ?? []}
-      liveLabel={liveLabel}
-    />
-  )
 
   const connectionTone = mode === 'live'
     ? { label: 'Conectado', bg: '#E7F1EB', border: '#CFE6DA', color: '#2F7D57', dot: '#2F7D57' }
@@ -892,226 +752,197 @@ export default function App() {
       ? { label: 'Demonstração', bg: '#F3E9D6', border: '#E7D6B4', color: '#946416', dot: '#C98A2B' }
       : { label: 'Aguardando', bg: '#ECE7DF', border: '#E2DDD4', color: '#6B655C', dot: '#A9A398' }
 
-  // Operações são rotas de verdade (sites → site → câmera): o App só provê os dados e o
-  // router monta o componente de cada nível pelo <Outlet /> do layout.
-  const operationsContextValue = useMemo<OperationsContextValue>(() => ({
-    operationSites,
-    operationCameras,
-    operationZones,
-    operationRules,
-    operationPpe,
-    operationsLoading,
-    operationsCatalog,
-    activeCamerasCount,
-    incidents,
-    connectionTone,
+  const operationsController = useOperationsController({
+    activeOrganization,
     mode,
-    ENTITY_STATUS_BADGE,
-    ZONE_TYPE_BADGE,
-    readMetadataValue: readMetadataValueFromUnknown,
-    ruleSeverityBadge,
+    incidents,
+    incidentFilters,
+    connectionTone,
     activePermissions: meData?.active_permissions ?? [],
-    onCreateSite: async (payload) => { await operationMutations.createSite.mutateAsync(payload); await reloadOperationsCatalog() },
-    onCreateCamera: async (payload) => { await operationMutations.createCamera.mutateAsync(payload); await reloadOperationsCatalog() },
-    onCreateZone: async (payload) => { await operationMutations.createZone.mutateAsync(payload); await reloadOperationsCatalog() },
-    onUpdateSite: async (id, payload) => { await operationMutations.updateSite.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
-    onUpdateCamera: async (id, payload) => { await operationMutations.updateCamera.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
-    onUpdateZone: async (id, payload) => { await operationMutations.updateZone.mutateAsync({ id, payload }); await reloadOperationsCatalog() },
-    onDeleteZone: async (id) => { await operationMutations.deleteZone.mutateAsync(id); await reloadOperationsCatalog() },
-    onDeleteCamera: async (id) => { await operationMutations.deleteCamera.mutateAsync(id); await reloadOperationsCatalog() },
-    onLoadCameraFrame: loadCameraFrame,
-    onRequestLiveTicket: requestLiveTicket,
-    onRegisterEdgeWorker: async (payload) => {
-      if (!activeOrganization) throw new Error('Organização ativa ausente')
-      return registerEdgeWorker({ organization_id: activeOrganization.id, ...payload })
-    },
-    onCheckEdgeWorkerConfig: async (payload) => getCurrentEdgeWorkerConfig(payload.client_id, payload.api_key),
-    onOpenSite: goSite,
-    onOpenCamera: goCamera,
-    onBackToSites: () => goDashboard('operations'),
-    onOpenIncidents: () => goDashboard('incidents'),
-    edgeWorkers: edgeWorkersQuery.data?.items ?? [],
-  }), [operationSites, operationCameras, operationZones, operationRules, operationPpe, operationsLoading, operationsCatalog, activeCamerasCount, incidents, connectionTone, mode, meData, activeOrganization, loadCameraFrame, requestLiveTicket, edgeWorkersQuery.data])
-
-  const renderWorkspaceContent = () => {
-    switch (workspaceSection) {
-      case 'dashboard':
-        return (
-          <OverviewPage
-            incidentSummary={incidentSummary}
-            criticalIncidents={criticalIncidents}
-            avgAcknowledgementMinutes={avgAcknowledgementMinutes}
-            activeCamerasCount={activeCamerasCount}
-            totalCamerasCount={totalCamerasCount}
-            sitesCount={operationSites.length}
-            sites={overviewSites}
-            recentIncidents={recentIncidents}
-            selectedIncidentId={selectedIncidentId}
-            dashboardLoading={dashboardLoading}
-            dashboardError={dashboardError}
-            onOpenIncidents={() => openWorkspaceSection('incidents')}
-            onRegisterIncident={() => openWorkspaceSection('incidents')}
-            onSelectIncident={(id) => {
-              setSelectedIncidentId(id)
-              openWorkspaceSection('incidents')
-              if (activeOrganization) {
-                void loadIncidentContext(activeOrganization.id, id)
-              }
-            }}
-          />
-        )
-      case 'incidents':
-        return renderIncidentsSection()
-      case 'evidence':
-        return renderEvidenceSection()
-      case 'operations':
-        // O conteúdo vem do router: OperationsLayout + rota do nível (sites/site/câmera).
-        return (
-          <OperationsProvider value={operationsContextValue}>
-            <Outlet />
-          </OperationsProvider>
-        )
-      case 'audit':
-        return renderAuditSection()
-      case 'organizations':
-        return (
-          <OrganizationsPage
-            memberships={meData?.memberships ?? []}
-            activeOrganizationId={activeOrganization?.id ?? null}
-            activeOrganizationName={activeOrganization?.name ?? 'Organização ativa'}
-            userName={meData?.user.full_name ?? meData?.user.email ?? '—'}
-            liveLabel={liveLabel}
-            platformRole={meData?.user.platform_role ?? null}
-            isLoading={booting && !meData}
-          />
-        )
-      case 'users':
-        return (
-          <UsersPage
-            memberships={meData?.memberships ?? []}
-            userName={meData?.user.full_name ?? meData?.user.email ?? '—'}
-            userEmail={meData?.user.email ?? '—'}
-            activeOrganizationName={activeOrganization?.name ?? 'Organização ativa'}
-            activeOrganizationId={activeOrganization?.id ?? null}
-            activePermissions={meData?.active_permissions ?? []}
-            liveLabel={liveLabel}
-            isLoading={booting && !meData}
-          />
-        )
-      case 'settings':
-        return renderSettingsSection()
-      default:
-        return null
-    }
-  }
+    queryClient,
+    expireSession,
+    goSite,
+    goCamera,
+    goDashboard,
+  })
+  const {
+    operationsCatalog,
+    operationsLoading,
+    operationsError,
+    operationSites,
+    activeCamerasCount,
+    totalCamerasCount,
+    filteredSiteOptions,
+    filteredCameraOptions,
+    filteredZoneOptions,
+    overviewSites,
+    operationsContextValue,
+    activateDemoOperations,
+    resetOperations,
+    loadOperationsCatalog,
+  } = operationsController
 
   const activeRole = meData?.memberships.find((membership) => membership.organization.id === activeOrganization?.id)?.role
     ?? meData?.memberships[0]?.role
     ?? ''
   const liveLabel = mode === 'live' ? 'Conectado à API' : mode === 'demo' ? 'Modo demonstração local' : 'Aguardando conexão'
   return (
-    <main className="relative min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      {screen === 'landing' && <LandingPage onLogin={() => goLogin()} onScrollToSection={scrollToSection} />}
-
-      {screen === 'login' && (
-        <LoginPage
-          email={loginEmail}
-          password={loginPassword}
-          loading={loginLoading}
-          error={loginError}
-          onBack={() => goLanding()}
-          onEmailChange={setLoginEmail}
-          onPasswordChange={setLoginPassword}
-          onSubmit={() => void handleLogin()}
-          onDemoLogin={() => void handleLogin({ email: 'admin@vigia.local', password: 'change-me-dev' })}
-          onLocalDemo={() => void handleLogin({ forceDemo: true })}
-        />
-      )}
-
+    <SessionFrame
+      screen={screen}
+      booting={booting}
+      loginEmail={loginEmail}
+      loginPassword={loginPassword}
+      loginLoading={loginLoading}
+      loginError={loginError}
+      onLandingLogin={() => goLogin()}
+      onScrollToSection={scrollToSection}
+      onLoginBack={() => goLanding()}
+      onEmailChange={setLoginEmail}
+      onPasswordChange={setLoginPassword}
+      onLoginSubmit={() => void handleLogin()}
+      onDemoLogin={() => void handleLogin({ email: 'admin@vigia.local', password: 'change-me-dev' })}
+      onLocalDemo={() => void handleLogin({ forceDemo: true })}
+    >
       {screen === 'dashboard' && (
-        <div className="flex h-screen overflow-hidden bg-[var(--paper)] text-[var(--ink)]">
-          <aside className="hidden w-[250px] flex-none border-r border-[color:var(--border)] lg:block">
-            <Sidebar
-              orgName={activeOrganization?.name ?? 'Organização ativa'}
-              sitesCount={operationSites.length}
-              activeCamerasCount={activeCamerasCount}
-              userName={meData?.user.full_name ?? meData?.user.email ?? 'Usuário'}
-              userRole={activeRole ? `${activeRole.charAt(0).toUpperCase()}${activeRole.slice(1)}` : ''}
-              activeSection={workspaceSection}
-              openBadge={incidentSummary.open}
-              connection={{ label: mode === 'live' ? 'Ambiente online' : mode === 'demo' ? 'Modo demonstração' : 'Aguardando conexão', dot: connectionTone.dot }}
-              onSelect={openWorkspaceSection}
-              onHome={goLanding}
-              onSettings={() => openWorkspaceSection('settings')}
-              onLogout={logout}
-            />
-          </aside>
-
-          {mobileNavOpen ? (
-            <div className="fixed inset-0 z-40 lg:hidden">
-              <button type="button" aria-label="Fechar navegação" onClick={() => setMobileNavOpen(false)} className="absolute inset-0 bg-[rgba(32,27,24,0.38)]" />
-              <div className="absolute left-0 top-0 h-full w-[min(84vw,280px)] border-r border-[color:var(--border)] shadow-[0_24px_80px_rgba(32,27,24,0.2)]">
-                <Sidebar
-                  orgName={activeOrganization?.name ?? 'Organização ativa'}
-                  sitesCount={operationSites.length}
-                  activeCamerasCount={activeCamerasCount}
-                  userName={meData?.user.full_name ?? meData?.user.email ?? 'Usuário'}
-                  userRole={activeRole ? `${activeRole.charAt(0).toUpperCase()}${activeRole.slice(1)}` : ''}
-                  activeSection={workspaceSection}
-                  openBadge={incidentSummary.open}
-                  connection={{ label: mode === 'live' ? 'Ambiente online' : mode === 'demo' ? 'Modo demonstração' : 'Aguardando conexão', dot: connectionTone.dot }}
-                  onSelect={openWorkspaceSection}
-                  onHome={goLanding}
-                  onSettings={() => openWorkspaceSection('settings')}
-                  onLogout={logout}
-                  onClose={() => setMobileNavOpen(false)}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-[61px] flex-none items-center justify-between gap-4 border-b border-[color:var(--border)] bg-[var(--card)] px-5 sm:px-6">
-              <div className="flex min-w-0 items-center gap-3">
-                <button type="button" onClick={() => setMobileNavOpen(true)} aria-label="Abrir navegação" className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-[color:var(--line)] bg-[var(--paper)] text-[var(--muted)] lg:hidden">
-                  <Icon name="menu" size={18} />
-                </button>
-                <div className="min-w-0">
-                  <p className="truncate font-mono-ui text-[11px] tracking-[0.06em] text-[var(--nav-label)]">Início / {activeWorkspaceLabel}</p>
-                  <p className="truncate font-display text-[19px] font-bold leading-none tracking-[-0.02em] text-[var(--ink)]">{activeWorkspaceLabel}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 sm:gap-3.5">
-                <div className="hidden h-[38px] w-[230px] items-center gap-2.5 rounded-[9px] border border-[color:var(--line)] bg-[var(--paper)] px-3 xl:flex">
-                  <Icon name="search" size={16} className="flex-none text-[var(--nav-label)]" />
-                  <span className="flex-1 truncate text-[13px] text-[var(--nav-label)]">Buscar incidente, câmera…</span>
-                  <span className="flex-none rounded-[5px] border border-[color:var(--line)] px-[5px] py-px font-mono-ui text-[11px] text-[#bbb4a8]">⌘K</span>
-                </div>
-                <span className="hidden items-center gap-2 rounded-full border px-2.5 py-[5px] text-xs font-medium sm:inline-flex" style={{ background: connectionTone.bg, borderColor: connectionTone.border, color: connectionTone.color }}>
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: connectionTone.dot }} />
-                  {connectionTone.label}
-                </span>
-                <span className="hidden h-6 w-px bg-[var(--border)] sm:block" />
-                <button type="button" className="relative grid h-[38px] w-[38px] place-items-center rounded-[9px] border border-[color:var(--line)] bg-[var(--paper)] text-[var(--muted)] transition hover:text-[var(--ink)]">
-                  <Icon name="bell" size={18} />
-                  {incidentSummary.open > 0 ? <span className="absolute right-2 top-[7px] h-[7px] w-[7px] rounded-full border-[1.5px] border-[var(--card)] bg-[var(--accent)]" /> : null}
-                </button>
-                <span className="grid h-[38px] w-[38px] place-items-center rounded-[9px] bg-[var(--accent)] text-[13px] font-semibold text-white">{initialsFrom(meData?.user.full_name ?? meData?.user.email ?? 'U')}</span>
-              </div>
-            </header>
-
-            <main className="flex-1 overflow-auto px-5 py-6 sm:px-8 sm:py-7 lg:px-10">
-              {banner ? <div className="mx-auto mb-4 max-w-[1120px] rounded-[10px] border border-[rgba(47,125,87,0.24)] bg-[rgba(47,125,87,0.08)] px-4 py-3 text-sm text-[#236444]">{banner}</div> : null}
-              {dashboardError && workspaceSection !== 'dashboard' ? <div className="mx-auto mb-4 max-w-[1120px] rounded-[10px] border border-[rgba(193,85,43,0.22)] bg-[rgba(193,85,43,0.07)] px-4 py-3 text-sm text-[#9e4120]">{dashboardError}</div> : null}
-              {operationsError ? <div className="mx-auto mb-4 max-w-[1120px] rounded-[10px] border border-[rgba(193,85,43,0.22)] bg-[rgba(193,85,43,0.07)] px-4 py-3 text-sm text-[#9e4120]"><div className="flex flex-wrap items-center justify-between gap-3"><p>{operationsError}</p><button type="button" onClick={() => meData && void hydrateLiveDashboard(meData, selectedIncidentId ?? undefined)} className="font-medium text-[var(--ink)] underline decoration-[rgba(32,27,24,0.3)] underline-offset-4 transition hover:opacity-80">Tentar atualizar</button></div></div> : null}
-              {renderWorkspaceContent()}
-            </main>
-          </div>
-        </div>
+        <DashboardLayout
+          banner={banner}
+          dashboardError={dashboardError}
+          operationsError={operationsError}
+          onRetryOperations={() => meData && void hydrateLiveDashboard(meData, selectedIncidentId ?? undefined)}
+          activeOrganizationName={activeOrganization?.name ?? 'Organização ativa'}
+          sitesCount={operationSites.length}
+          activeCamerasCount={activeCamerasCount}
+          userName={meData?.user.full_name ?? meData?.user.email ?? 'Usuário'}
+          userRole={activeRole ? `${activeRole.charAt(0).toUpperCase()}${activeRole.slice(1)}` : ''}
+          activeSection={workspaceSection}
+          openBadge={incidentSummary.open}
+          connection={{ label: mode === 'live' ? 'Ambiente online' : mode === 'demo' ? 'Modo demonstração' : 'Aguardando conexão', dot: connectionTone.dot }}
+          connectionTone={connectionTone}
+          onSelect={openWorkspaceSection}
+          onHome={goLanding}
+          onSettings={() => openWorkspaceSection('settings')}
+          onLogout={logout}
+          mobileNavOpen={mobileNavOpen}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+          onCloseMobileNav={() => setMobileNavOpen(false)}
+          activeWorkspaceLabel={activeWorkspaceLabel}
+          initials={initialsFrom(meData?.user.full_name ?? meData?.user.email ?? 'U')}
+          showDashboardError={workspaceSection !== 'dashboard'}
+        >
+          <WorkspaceContent
+            workspaceSection={workspaceSection}
+            overview={{
+              incidentSummary,
+              criticalIncidents,
+              avgAcknowledgementMinutes,
+              activeCamerasCount,
+              totalCamerasCount,
+              sitesCount: operationSites.length,
+              sites: overviewSites,
+              recentIncidents,
+              selectedIncidentId,
+              dashboardLoading,
+              dashboardError,
+              onOpenIncidents: () => openWorkspaceSection('incidents'),
+              onRegisterIncident: () => openWorkspaceSection('incidents'),
+              onSelectIncident: (id) => {
+                setSelectedIncidentId(id)
+                openWorkspaceSection('incidents')
+                if (activeOrganization) void loadIncidentContext(activeOrganization.id, id)
+              },
+            }}
+            incidents={{
+              incidents,
+              incidentSummary,
+              selectedIncident,
+              selectedIncidentId,
+              auditLog,
+              incidentFilters,
+              incidentQuery,
+              hasActiveIncidentFilters,
+              dashboardLoading,
+              dashboardError,
+              operationsLoading,
+              operationsCatalog,
+              filteredSiteOptions,
+              filteredCameraOptions,
+              filteredZoneOptions,
+              incidentPageInfo,
+              incidentLoadingMore,
+              connectionTone,
+              mode,
+              actionBusy,
+              evidenceItemsCount: evidenceItems.length,
+              onIncidentQueryChange: setIncidentQuery,
+              onUpdateIncidentFilters: updateIncidentFilters,
+              onResetIncidentFilters: resetIncidentFilters,
+              onSelectIncident: (id) => activeOrganization && void loadIncidentContext(activeOrganization.id, id),
+              onLoadIncidentContext: (id) => activeOrganization && void loadIncidentContext(activeOrganization.id, id),
+              onLoadMoreIncidents: () => void loadMoreIncidents(),
+              onOpenEvidence: () => void openWorkspaceSection('evidence'),
+              onHandleAction: handleAction,
+              onOpenWorkspaceSection: openWorkspaceSection,
+            }}
+            evidence={{
+              selectedIncident,
+              activeOrganizationName: activeOrganization?.name ?? null,
+              openWorkspaceSection,
+              explorer: {
+                evidenceItems,
+                selectedEvidence,
+                evidenceLoading,
+                evidenceError,
+                evidenceDownloadUrl,
+                evidenceDownloadLoading,
+                evidenceDownloadError,
+                evidencePageInfo,
+                evidenceLoadingMore,
+                onSelectEvidence: selectEvidence,
+                onOpenEvidence: () => void openSelectedEvidence(),
+                onRetry: () => selectedIncident && void loadEvidenceContext(activeOrganization?.id ?? selectedIncident.organization_id, selectedIncident.id),
+                onLoadMoreEvidence: () => void loadMoreEvidence(),
+              },
+            }}
+            operations={{ value: operationsContextValue }}
+            audit={{
+              auditLog,
+              selectedIncident,
+              activeOrganizationName: activeOrganization?.name ?? '—',
+              activeOrganizationId: activeOrganization?.id ?? null,
+              activePermissions: meData?.active_permissions ?? [],
+              canReadAudit: meData?.active_permissions.includes('audit.read') ?? false,
+              openWorkspaceSection,
+            }}
+            organizations={{
+              memberships: meData?.memberships ?? [],
+              activeOrganizationId: activeOrganization?.id ?? null,
+              activeOrganizationName: activeOrganization?.name ?? 'Organização ativa',
+              userName: meData?.user.full_name ?? meData?.user.email ?? '—',
+              liveLabel,
+              platformRole: meData?.user.platform_role ?? null,
+              isLoading: booting && !meData,
+            }}
+            users={{
+              memberships: meData?.memberships ?? [],
+              userName: meData?.user.full_name ?? meData?.user.email ?? '—',
+              userEmail: meData?.user.email ?? '—',
+              activeOrganizationName: activeOrganization?.name ?? 'Organização ativa',
+              activeOrganizationId: activeOrganization?.id ?? null,
+              activePermissions: meData?.active_permissions ?? [],
+              liveLabel,
+              isLoading: booting && !meData,
+            }}
+            settings={{
+              userName: meData?.user.full_name ?? meData?.user.email ?? '—',
+              userEmail: meData?.user.email ?? '—',
+              organizationName: activeOrganization?.name ?? 'Organização ativa',
+              organizationId: activeOrganization?.id ?? null,
+              activePermissions: meData?.active_permissions ?? [],
+              liveLabel,
+            }}
+          />
+        </DashboardLayout>
       )}
-
-      {booting ? <div className="pointer-events-none fixed bottom-4 right-4 rounded-lg border border-[color:var(--line)] bg-[var(--card)] px-4 py-2 text-xs uppercase tracking-[0.24em] text-[var(--muted)] shadow-[0_12px_30px_rgba(32,27,24,0.1)]">Verificando sessão…</div> : null}
-    </main>
+    </SessionFrame>
   )
 }

@@ -3,10 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-try:
-    from sqlalchemy import select  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
+from sqlalchemy import select
 
 from ..domain.account_recovery import EmailVerificationToken, PasswordResetToken, QueuedRecoveryEmail, RecoveryAuditLog, RecoveryTokenStatus
 from .models import EmailVerificationToken as EmailVerificationRow
@@ -43,8 +40,6 @@ class SqlAlchemyAccountRecoveryRepository:
             session.commit()
 
     def find_password_reset_by_token_hash(self, token_hash: str) -> PasswordResetToken | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             row = session.execute(select(PasswordResetRow).where(PasswordResetRow.token_hash == token_hash)).scalars().first()
             return self._reset_to_domain(row)
@@ -55,8 +50,6 @@ class SqlAlchemyAccountRecoveryRepository:
             session.commit()
 
     def find_email_verification_by_token_hash(self, token_hash: str) -> EmailVerificationToken | None:
-        if select is None:
-            return None
         with self.session_factory() as session:
             row = session.execute(select(EmailVerificationRow).where(EmailVerificationRow.token_hash == token_hash)).scalars().first()
             return self._verification_to_domain(row)

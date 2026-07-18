@@ -26,8 +26,8 @@ Uma detecção vira incidente quando a API confirma, no mínimo:
 2. A API valida e normaliza o evento.
 3. A API decide: criar incidente, anexar a incidente existente ou descartar.
 4. Se criar, grava no banco e emite rastros de auditoria.
-5. O serviço de notificação consome o incidente criado.
-6. A plataforma envia notificações para dashboard/in-app e, quando permitido, e-mail.
+5. O incidente persiste com notificação em fila.
+6. O scheduler operacional consome a fila, aplica lock Redis e então envia notificações para dashboard/in-app e, quando permitido, e-mail.
 7. Ações do usuário atualizam entrega, visualização, reconhecimento e encerramento.
 
 ## Estados do incidente
@@ -38,7 +38,7 @@ Uma detecção vira incidente quando a API confirma, no mínimo:
 - `dismissed`: o caso foi descartado com justificativa.
 
 ## Estados de notificação
-- `pending`: pronta para envio.
+- `queued`: pronta para o scheduler enviar.
 - `sent`: enviada ao canal.
 - `delivered`: recebida pelo canal/integração, quando suportado.
 - `seen`: vista no dashboard/app.

@@ -6,13 +6,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..container import AppContainer, build_container, default_container
-from ..domain.auth import MembershipSummary, OrganizationSummary, Permission, PlatformRole
+from ..domain.auth import MembershipSummary, OrganizationSummary, PlatformRole
 from ..domain.edge_workers import EdgeWorker
 from ..domain.incidents import IncidentStatus, parse_detection_event
 from ..domain.operations import ZoneType
 from ..services.auth import InMemoryAuthRepository
 from ..services.incidents import InMemoryIncidentRepository
 from ..services.security import hash_password, hash_token
+from ..security.permissions import role_permissions
 from ..settings import settings
 
 PLATFORM_ADMIN_EMAIL = "platform@vigia.local"
@@ -69,9 +70,10 @@ BASE_CAMERAS: list[dict[str, Any]] = [
 ]
 
 # polygon em coordenadas normalizadas [0..1] do frame — usado pela geometria do worker.
+# Os polígonos representam áreas de piso/solo plausíveis no vídeo demo, não o frame inteiro.
 BASE_ZONES: list[dict[str, Any]] = [
-    {"id": DEMO_ZONE_ID, "site_id": DEMO_SITE_ID, "camera_id": DEMO_CAMERA_ID, "zone_type": ZoneType.RESTRICTED, "name": "Área Restrita Demo", "polygon": {"type": "polygon", "points": [[0.15, 0.4], [0.85, 0.4], [0.85, 0.95], [0.15, 0.95]]}},
-    {"id": "zone-demo-01-ppe", "site_id": DEMO_SITE_ID, "camera_id": DEMO_CAMERA_ID, "zone_type": ZoneType.PPE, "name": "EPI Obrigatório Demo", "polygon": {"type": "polygon", "points": [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]]}},
+    {"id": DEMO_ZONE_ID, "site_id": DEMO_SITE_ID, "camera_id": DEMO_CAMERA_ID, "zone_type": ZoneType.RESTRICTED, "name": "Área Restrita Demo", "polygon": {"type": "polygon", "points": [[0.23, 0.63], [0.68, 0.61], [0.78, 0.97], [0.18, 0.97]]}},
+    {"id": "zone-demo-01-ppe", "site_id": DEMO_SITE_ID, "camera_id": DEMO_CAMERA_ID, "zone_type": ZoneType.PPE, "name": "EPI Obrigatório Demo", "polygon": {"type": "polygon", "points": [[0.08, 0.58], [0.92, 0.57], [0.86, 0.96], [0.14, 0.96]]}},
     {"id": "zone-demo-patio-sul-access", "site_id": "site-demo-patio-sul", "camera_id": "camera-demo-patio-sul-01", "zone_type": ZoneType.ACCESS, "name": "Portaria 2 / Acesso de Veículos", "polygon": {}},
     {"id": "zone-demo-doca-norte-ppe", "site_id": "site-demo-doca-norte", "camera_id": "camera-demo-doca-norte-01", "zone_type": ZoneType.PPE, "name": "Linha 2 Pintura / EPI Obrigatório", "polygon": {}},
 ]
@@ -118,9 +120,9 @@ def _ensure_auth_demo_memory(repository: InMemoryAuthRepository) -> dict[str, An
         platform_user = org_user
     platform_user = type(org_user)(id=PLATFORM_ADMIN_ID, email=PLATFORM_ADMIN_EMAIL, full_name="VigIA Platform Admin", password_hash=hash_password(PLATFORM_ADMIN_PASSWORD), platform_role=PlatformRole.PLATFORM_ADMIN, is_active=True, email_verified_at=org_user.email_verified_at, created_at=org_user.created_at)
     repository.add_user(platform_user)
-    repository.memberships[platform_user.id] = [MembershipSummary(organization=OrganizationSummary(id=DEMO_ORGANIZATION_ID, name="VigIA Local", slug=DEMO_ORGANIZATION_SLUG), role="platform_admin", permissions=[Permission.VIEW_DASHBOARD, Permission.MANAGE_USERS, Permission.MANAGE_ORG], active=True)]
+    repository.memberships[platform_user.id] = [MembershipSummary(organization=OrganizationSummary(id=DEMO_ORGANIZATION_ID, name="VigIA Local", slug=DEMO_ORGANIZATION_SLUG), role="platform_admin", permissions=sorted(role_permissions("platform_admin")), active=True)]
     org = OrganizationSummary(id=DEMO_ORGANIZATION_ID, name="VigIA Local", slug=DEMO_ORGANIZATION_SLUG)
-    membership = MembershipSummary(organization=org, role="org_owner", permissions=[Permission.VIEW_DASHBOARD, Permission.MANAGE_USERS, Permission.MANAGE_ORG], active=True)
+    membership = MembershipSummary(organization=org, role="org_owner", permissions=sorted(role_permissions("org_owner")), active=True)
     memberships = [item for item in repository.memberships.get(org_user.id, []) if item.organization.id not in {DEMO_ORGANIZATION_ID, "org-dev"}]
     repository.memberships[org_user.id] = [membership, *memberships]
     return {"user_id": org_user.id, "org_id": DEMO_ORGANIZATION_ID, "platform_user_id": platform_user.id}
@@ -196,6 +198,8 @@ def _ensure_operations_demo(container: AppContainer, org_id: str) -> dict[str, s
     for payload in BASE_ZONES:
         if payload["id"] not in zones:
             zones[payload["id"]] = repo.create_zone(org_id, payload["site_id"], payload["camera_id"], zone_type=payload["zone_type"], polygon_json=payload.get("polygon") or {}, zone_id=payload["id"], name=payload.get("name"))
+        elif zones[payload["id"]].polygon_json != (payload.get("polygon") or {}):
+            zones[payload["id"]] = repo.update_zone(org_id, payload["id"], site_id=payload["site_id"], camera_id=payload["camera_id"], zone_type=payload["zone_type"], polygon_json=payload.get("polygon") or {}, name=payload.get("name"))
 
     workers = {worker.id: worker for worker in repo.list_workers(org_id)}
     for payload in BASE_WORKERS:

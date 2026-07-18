@@ -11,8 +11,21 @@ from vigia_edge_worker.config import default_config
 from vigia_edge_worker.events import validate_detection_event, validate_heartbeat_event
 from vigia_edge_worker.heartbeat import build_heartbeat
 from vigia_edge_worker.mock_detector import detect_once
+from vigia_edge_worker.telemetry import TelemetryState
 
 from vigia_api.domain.incidents import parse_detection_event
+
+
+def _load_permissions() -> dict:
+    text = (Path(__file__).resolve().parents[3] / "packages" / "contracts" / "permissions" / "permissions.yaml").read_text().splitlines()
+    permissions = []
+    current = None
+    for line in text:
+        stripped = line.strip()
+        if stripped.startswith("- key:"):
+            current = stripped.split(":", 1)[1].strip()
+            permissions.append(current)
+    return {"permissions": permissions}
 
 
 class ContractAlignmentTest(unittest.TestCase):
@@ -23,12 +36,19 @@ class ContractAlignmentTest(unittest.TestCase):
         schema = json.loads((Path(__file__).resolve().parents[3] / "packages" / "contracts" / "events" / "detection-event.v1.schema.json").read_text())
         self.assertEqual(schema["additionalProperties"], False)
 
+    def test_permissions_have_no_duplicates(self) -> None:
+        perms = _load_permissions()["permissions"]
+        self.assertEqual(len(perms), len(set(perms)))
+
     def test_heartbeat_event_matches_schema_keys(self) -> None:
-        payload = build_heartbeat(default_config(), processed_frames=1, emitted_events=1).to_dict()
+        schema = json.loads((Path(__file__).resolve().parents[3] / "packages" / "contracts" / "events" / "edge-heartbeat.v1.schema.json").read_text())
+        telemetry = TelemetryState(cv_mode="mock", source_type="video", worker_version="test")
+        payload = build_heartbeat(default_config(), processed_frames=1, emitted_events=1, telemetry=telemetry, last_error="camera offline", pending_queue=2).to_dict()
         validate_heartbeat_event(payload)
         self.assertEqual(set(payload), {"client_id", "organization_id", "site_id", "sent_at", "status", "version"})
         self.assertIsInstance(payload["status"], dict)
         self.assertEqual(payload["status"]["state"], "ok")
+        self.assertTrue(set(payload["status"]).issubset(schema["properties"]["status"]["properties"]))
 
     def test_parse_detection_timestamp_becomes_detected_at(self) -> None:
         payload = {

@@ -1,46 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import APIRouter, Depends, Header, HTTPException, Request
-except Exception:  # pragma: no cover
-    if TYPE_CHECKING:
-        from fastapi import APIRouter, Depends, Header, HTTPException, Request
-    else:
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
-
-        class Depends:  # type: ignore[no-redef]
-            def __init__(self, dependency: Any):
-                self.dependency = dependency
-
-        class Header:  # type: ignore[no-redef]
-            def __init__(self, default: Any = None, alias: str | None = None):
-                self.default = default
-                self.alias = alias
-
-        class Request:  # type: ignore[no-redef]
-            pass
-
-        class APIRouter:  # type: ignore[no-redef]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def post(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
-
-            def get(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...container import edge_worker_service

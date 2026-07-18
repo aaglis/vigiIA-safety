@@ -21,7 +21,11 @@ export interface OperationCamera {
   organization_id: string
   site_id: string
   name: string
-  stream_identifier: string
+  /** Valor público seguro. Nunca contém usuário/senha/host/path do RTSP real. */
+  display_stream_identifier?: string
+  stream_source_type?: string
+  /** @deprecated endpoints de Operações não devem retornar isto ao navegador. */
+  stream_identifier?: string
   status: OperationEntityStatus
 }
 
@@ -94,7 +98,10 @@ export interface CreateZoneInput {
 }
 
 export interface UpdateSiteInput extends CreateSiteInput {}
-export interface UpdateCameraInput extends CreateCameraInput {}
+export interface UpdateCameraInput extends Omit<CreateCameraInput, 'stream_identifier'> {
+  /** Ausente/vazio mantém o stream secreto já salvo; preenchido troca a URL. */
+  stream_identifier?: string
+}
 export interface UpdateZoneInput extends CreateZoneInput {}
 
 function operationsPath(organizationId: string, path: string) {
@@ -118,7 +125,11 @@ export function createOperationCamera(organizationId: string, payload: CreateCam
 }
 
 export function updateOperationCamera(organizationId: string, cameraId: string, payload: UpdateCameraInput) {
-  return apiFetch<{ camera: OperationCamera }>(operationsPath(organizationId, `cameras/${cameraId}`), { method: 'PATCH', body: JSON.stringify({ site_id: payload.site_id, name: payload.name, stream_identifier: payload.stream_identifier, status: payload.status ?? 'active', metadata: payload.metadata ?? {} }) })
+  const body: Record<string, unknown> = { site_id: payload.site_id, name: payload.name, status: payload.status ?? 'active' }
+  const stream = payload.stream_identifier?.trim()
+  if (stream) body.stream_identifier = stream
+  if (payload.metadata) body.metadata = payload.metadata
+  return apiFetch<{ camera: OperationCamera }>(operationsPath(organizationId, `cameras/${cameraId}`), { method: 'PATCH', body: JSON.stringify(body) })
 }
 
 export function createOperationZone(organizationId: string, payload: CreateZoneInput) {

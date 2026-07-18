@@ -61,6 +61,18 @@ def bbox_base_center(bbox_norm: tuple[float, float, float, float]) -> Point:
     return ((x1 + x2) / 2.0, y2)
 
 
+def bbox_base_center_visible(bbox_norm: tuple[float, float, float, float]) -> bool:
+    """True quando a base do bbox está visível dentro do frame.
+
+    Se a borda inferior já está cortada no limite do frame, não há como inferir
+    com confiança em qual área do chão os pés estão. Topo/cabeça cortados não
+    invalidam a regra quando a base continua visível.
+    """
+    x1, y1, x2, y2 = bbox_norm
+    base_x, base_y = bbox_base_center(bbox_norm)
+    return x2 > x1 and y2 > y1 and 0.0 <= base_x <= 1.0 and 0.0 <= base_y < 1.0
+
+
 def bbox_center(bbox_norm: tuple[float, float, float, float]) -> Point:
     x1, y1, x2, y2 = bbox_norm
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)

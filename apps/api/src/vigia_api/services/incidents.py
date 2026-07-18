@@ -98,9 +98,9 @@ class InMemoryIncidentRepository:
         return next((i for i in self._incidents.values() if i.organization_id == organization_id and i.detection_event_id == detection_event_id), None)
 
     def list_by_organization(self, organization_id: str) -> list[Incident]:
-        return [i for i in self._incidents.values() if i.organization_id == organization_id]
+        return sorted([i for i in self._incidents.values() if i.organization_id == organization_id], key=lambda i: (i.created_at, i.id), reverse=True)
 
-    def list_filtered(self, organization_id: str, **filters) -> list[Incident]:
+    def list_filtered(self, organization_id: str, limit: int | None = None, offset: int = 0, **filters) -> list[Incident]:
         items = self.list_by_organization(organization_id)
         status = filters.get("status")
         site_id = filters.get("site_id")
@@ -123,7 +123,13 @@ class InMemoryIncidentRepository:
             items = [i for i in items if i.created_at >= created_from]
         if created_to:
             items = [i for i in items if i.created_at <= created_to]
-        return items
+        items = sorted(items, key=lambda i: (i.created_at, i.id), reverse=True)
+        if limit is None:
+            return items[offset:]
+        return items[offset: offset + limit]
+
+    def count_filtered(self, organization_id: str, **filters) -> int:
+        return len(self.list_filtered(organization_id, limit=None, offset=0, **filters))
 
     def get(self, organization_id: str, incident_id: str) -> Incident:
         incident = self._incidents[incident_id]
@@ -184,6 +190,10 @@ class InMemoryIncidentRepository:
         if status is not None:
             items = [entry for entry in items if entry.status == status]
         return items
+
+    def list_notification_organizations(self, status: str | None = None) -> list[str]:
+        orgs = {entry.organization_id for entry in self._notifications if status is None or entry.status == status}
+        return sorted(orgs)
 
     def update_notification_status(self, notification_id: str, status: str, *, processed_at: datetime | None = None, error: str | None = None) -> NotificationAttempt:
         for index, entry in enumerate(self._notifications):

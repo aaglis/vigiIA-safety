@@ -2,13 +2,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { Button, SelectField, TextField } from '../../../../components/ui/dashboard'
 import type { OperationSite } from '../../../../api/operations'
-import { cameraFormSchema, type CameraFormValues } from '../schemas'
+import { cameraEditFormSchema, cameraFormSchema, type CameraFormValues } from '../schemas'
 
 export function CameraForm({
   sites,
   defaultSiteId,
   initial,
   submitLabel = 'Criar câmera',
+  requireStream = true,
   onSubmit,
   onCancel,
 }: {
@@ -16,6 +17,7 @@ export function CameraForm({
   defaultSiteId?: string
   initial?: Partial<CameraFormValues>
   submitLabel?: string
+  requireStream?: boolean
   onSubmit: (values: CameraFormValues) => Promise<void>
   onCancel: () => void
 }) {
@@ -24,7 +26,7 @@ export function CameraForm({
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<CameraFormValues>({
-    resolver: zodResolver(cameraFormSchema),
+    resolver: zodResolver(requireStream ? cameraFormSchema : cameraEditFormSchema),
     defaultValues: {
       site_id: initial?.site_id ?? defaultSiteId ?? sites[0]?.id ?? '',
       name: initial?.name ?? '',
@@ -49,8 +51,8 @@ export function CameraForm({
       />
       <TextField
         label="URL do stream"
-        placeholder="rtsp://10.0.0.20:554/live"
-        helperText="Endereço RTSP/RTMP da câmera. A visão computacional roda direto neste stream."
+        placeholder={requireStream ? 'rtsp://10.0.0.20:554/live' : 'deixe em branco para manter a URL atual'}
+        helperText={requireStream ? 'Endereço RTSP/RTMP da câmera. A visão computacional roda direto neste stream.' : 'Por segurança a URL salva não é exibida. Preencha só se for trocar o stream.'}
         errorText={errors.stream_identifier?.message}
         {...register('stream_identifier')}
       />

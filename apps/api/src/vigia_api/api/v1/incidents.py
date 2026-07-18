@@ -1,42 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import APIRouter, Depends, HTTPException, Request
-except Exception:  # pragma: no cover
-    if TYPE_CHECKING:
-        from fastapi import APIRouter, Depends, HTTPException, Request
-    else:
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
-
-        class Depends:  # type: ignore[no-redef]
-            def __init__(self, dependency: Any):
-                self.dependency = dependency
-
-        class Request:  # type: ignore[no-redef]
-            pass
-
-        class APIRouter:  # type: ignore[no-redef]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def post(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
-
-            def get(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...domain.incidents import IncidentStatus, parse_detection_event
@@ -108,7 +75,13 @@ def list_incidents(organization_id: str, request: Request, limit: int = DEFAULT_
     repo = _repository(request)
     created_from_dt = datetime.fromisoformat(created_from.replace("Z", "+00:00")) if created_from else None
     created_to_dt = datetime.fromisoformat(created_to.replace("Z", "+00:00")) if created_to else None
-    items = repo.list_filtered(organization_id, status=status, site_id=site_id, camera_id=camera_id, zone_id=zone_id, severity=severity, created_from=created_from_dt, created_to=created_to_dt) if hasattr(repo, "list_filtered") else repo.list_by_organization(organization_id)
+    filters = {"status": status, "site_id": site_id, "camera_id": camera_id, "zone_id": zone_id, "severity": severity, "created_from": created_from_dt, "created_to": created_to_dt}
+    if hasattr(repo, "list_filtered"):
+        items = repo.list_filtered(organization_id, limit=limit, offset=offset, **filters)
+        total = repo.count_filtered(organization_id, **filters) if hasattr(repo, "count_filtered") else len(repo.list_filtered(organization_id, **filters))
+        page = [incident_to_dict(incident) for incident in items]
+        return {"items": page, "page_info": {"limit": max(1, min(limit, MAX_LIMIT)), "offset": max(0, offset), "total": total, "has_next": max(0, offset) + max(1, min(limit, MAX_LIMIT)) < total}}
+    items = repo.list_by_organization(organization_id)
     return _paginate([incident_to_dict(incident) for incident in items], limit=limit, offset=offset)
 
 

@@ -34,6 +34,7 @@ required_files=(
   "packages/contracts/events/notification-delivery-updated.v1.schema.json"
   "packages/contracts/permissions/permissions.yaml"
   "packages/contracts/openapi/README.md"
+  "scripts/validate-contracts.py"
   "infra/compose/docker-compose.dev.yml"
   "infra/pdc/docker-compose.yml"
   "docs/architecture/repository-structure.md"
@@ -99,6 +100,12 @@ done
 echo "Validação OK: documentação base presente."
 
 if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/validate-contracts.py
+else
+  echo "Python3 indisponível; validação de contratos ignorada."
+fi
+
+if command -v python3 >/dev/null 2>&1; then
   python3 - <<'PY'
 import json, pathlib
 for path in [pathlib.Path('package.json'), pathlib.Path('apps/web/package.json')]:
@@ -124,4 +131,15 @@ if command -v python3 >/dev/null 2>&1; then
   fi
 else
   echo "Python3 indisponível; testes do edge-worker ignorados."
+fi
+
+if command -v npm >/dev/null 2>&1 && [[ -d "node_modules" ]]; then
+  npm --workspace apps/web run test:unit
+  echo "Validação OK: apps/web test:unit executado."
+  npm --workspace apps/web run typecheck
+  echo "Validação OK: apps/web typecheck executado."
+  npm --workspace apps/web run build
+  echo "Validação OK: apps/web build executado."
+else
+  echo "npm indisponível ou dependências não instaladas; validação do frontend ignorada."
 fi

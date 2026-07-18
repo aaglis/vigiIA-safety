@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "filename": "ppe-multiclass.pt",
+      "version": "ppe-multiclass-1",
+      "source": "https://huggingface.co/Hansung-Cho/yolov8-ppe-detection/resolve/main/best.pt",
+      "license": "AGPL-3.0",
+      "sha256": "2419700bbe3b8d38f9000655d9cf952a4bc93ef6c143baf8b49a0abde5d0760f",
+      "notes": "Detecta person/helmet/no_helmet; usado para intrusão restrita + contrato de EPI."
+    },
+    {
+      "filename": "ppe-hardhat.pt",
+      "version": "ppe-hardhat-1",
+      "source": "https://huggingface.co/keremberke/yolov8n-hard-hat-detection/resolve/main/best.pt",
+      "license": "unknown-upstream; verify before commercial use",
+      "sha256": "05ed3a517485292d42d6eb6c9be3987ea51cd162e04807d2741eadcac8a19e6c",
+      "notes": "Hardhat-only; não cobre intrusão por pessoa sozinho."
+    }
+  ]
+}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button } from '../ui/dashboard'
 import { Icon } from '../ui/icons'
 
 export type PolygonPoint = [number, number]
@@ -66,7 +65,7 @@ export function ZonePolygonEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] font-medium text-[#403933]">Área monitorada</span>
+        <span className="text-[13px] font-medium text-[#403933]">Polígono do piso (2D)</span>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => onChange(points.slice(0, -1))} disabled={points.length === 0} className="text-[12px] font-medium text-[var(--ink)] disabled:cursor-not-allowed disabled:text-[#C0BAB0] hover:underline">
             Desfazer
@@ -86,11 +85,28 @@ export function ZonePolygonEditor({
       >
         {frameUrl ? <img src={frameUrl} alt="Frame da câmera" className="pointer-events-none absolute inset-0 h-full w-full object-cover" /> : null}
 
+        <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[220px] rounded-[12px] border border-white/70 bg-white/90 px-3 py-2 shadow-[0_12px_28px_rgba(32,27,24,0.12)] backdrop-blur-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A6D44]">Exemplo estático</p>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="relative h-14 w-11 shrink-0">
+              <div className="absolute left-1/2 top-0 h-4 w-4 -translate-x-1/2 rounded-full border border-[#8A6D44]/45 bg-[#FBF7EE]" />
+              <div className="absolute left-1/2 top-[15px] h-5 w-[2px] -translate-x-1/2 rounded-full bg-[#8A6D44]/60" />
+              <div className="absolute left-1/2 top-[20px] h-7 w-6 -translate-x-1/2 rounded-[10px] border border-dashed border-[#8A6D44]/45 bg-[#8A6D44]/10" />
+              <div className="absolute bottom-[3px] left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-[var(--ink)] shadow-[0_0_0_4px_rgba(139,109,68,0.16)]" />
+              <div className="absolute bottom-[3px] left-1/2 h-[2px] w-7 -translate-x-1/2 rounded-full bg-[#8A6D44]/45" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold leading-4 text-[var(--ink)]">ponto avaliado</p>
+              <p className="text-[11px] leading-4 text-[#7F7768]">pés / base da pessoa</p>
+            </div>
+          </div>
+        </div>
+
         {!frameUrl ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center">
             <Icon name="image" size={18} className="text-[#A9A398]" />
             <p className="text-[13px] font-medium text-[var(--ink)]">{frameLoading ? 'Buscando frame da câmera…' : 'Sem frame desta câmera ainda'}</p>
-            {!frameLoading ? <p className="max-w-[280px] text-[12px] leading-5 text-[#8E887B]">A imagem aparece após o primeiro incidente com evidência. Você ainda pode desenhar a área usando a grade.</p> : null}
+            {!frameLoading ? <p className="max-w-[280px] text-[12px] leading-5 text-[#8E887B]">A imagem aparece quando a câmera ao vivo ou uma evidência estiver disponível. Você ainda pode desenhar a área usando a grade.</p> : null}
           </div>
         ) : null}
 
@@ -122,9 +138,9 @@ export function ZonePolygonEditor({
 
       <p className="text-[12px] leading-5 text-[var(--label)]">
         {points.length === 0
-          ? 'Clique para marcar os cantos da área. Mínimo de 3 pontos.'
+          ? 'Clique para marcar os cantos do piso. Mínimo de 3 pontos.'
           : closed
-            ? `${points.length} pontos · arraste para ajustar. Só o que estiver dentro da área vira incidente.`
+            ? `${points.length} pontos · arraste para ajustar. Só vale quando os pés/base da pessoa entram no polígono.`
             : `${points.length} de 3 pontos — continue clicando para fechar a área.`}
       </p>
     </div>

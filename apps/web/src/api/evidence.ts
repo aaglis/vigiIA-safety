@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Metadata } from './types'
+import type { Metadata, PageInfo } from './types'
 
 export type EvidenceKind = 'snapshot' | 'clip' | 'metadata' | (string & {})
 
@@ -18,14 +18,14 @@ export interface EvidenceItem {
   metadata: Metadata
 }
 
+export interface EvidenceListParams {
+  limit?: number
+  offset?: number
+}
+
 export interface EvidenceListResponse {
   items: EvidenceItem[]
-  page_info?: {
-    limit: number
-    offset: number
-    total: number
-    has_next: boolean
-  }
+  page_info: PageInfo
 }
 
 export interface EvidenceDownloadResponse {
@@ -35,8 +35,10 @@ export interface EvidenceDownloadResponse {
   expires_at: string
 }
 
-export function listEvidence(organizationId: string, incidentId: string) {
+export function listEvidence(organizationId: string, incidentId: string, params: EvidenceListParams = {}) {
   const query = new URLSearchParams({ incident_id: incidentId })
+  query.set('limit', String(params.limit ?? 50))
+  query.set('offset', String(params.offset ?? 0))
   return apiFetch<EvidenceListResponse>(`/organizations/${organizationId}/evidence?${query.toString()}`)
 }
 

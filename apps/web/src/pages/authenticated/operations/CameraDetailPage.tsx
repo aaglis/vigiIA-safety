@@ -69,7 +69,7 @@ export function CameraDetailPage({
               {badge.label}
             </span>
           </div>
-          <p className="mt-1 truncate font-mono-ui text-[11px] text-[#A9A398]">{camera.stream_identifier}</p>
+          <p className="mt-1 truncate font-mono-ui text-[11px] text-[#A9A398]">{camera.display_stream_identifier ?? 'Fonte configurada'}</p>
         </div>
       </div>
 

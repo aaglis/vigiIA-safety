@@ -20,6 +20,56 @@ docker compose -p "$project_name" -f "$compose_file" config -q
 echo "CI smoke: construindo imagens mínimas..."
 docker compose -p "$project_name" -f "$compose_file" build api migrate seed edge-worker
 
+eval_model="${CV_REAL_EVAL_MODEL_HOST_PATH:-apps/edge-worker/models/ppe-multiclass.pt}"
+eval_recall_floor="${CV_REAL_EVAL_MIN_RECALL:-0.45}"
+eval_report="/tmp/vigia-cv-real-eval.json"
+if [[ -f "$eval_model" ]]; then
+  echo "CI smoke: avaliando CV real em cv-real/v2 (recall mínimo EPI=${eval_recall_floor})..."
+  eval_model_dir="$(cd "$(dirname "$eval_model")" && pwd)"
+  eval_model_file="$(basename "$eval_model")"
+  if ! docker compose -p "$project_name" -f "$compose_file" --profile cv run --rm --no-deps \
+    -v "$PWD/apps/edge-worker/datasets:/datasets:ro" \
+    -v "$eval_model_dir:/eval-model:ro" \
+    -e YOLO_CONFIG_DIR=/tmp/Ultralytics \
+    --entrypoint python edge-worker -m vigia_edge_worker.evaluation_real \
+    --dataset /datasets/cv-real/v2/manifest.json \
+    --model "/eval-model/${eval_model_file}" \
+    --conf 0.4 \
+    --min-samples 30 \
+    --min-helmet-samples 1 \
+    --min-empty-samples 1 \
+    --min-ppe-recall "$eval_recall_floor" > "$eval_report"; then
+    python3 - <<'PY'
+from pathlib import Path
+
+report = Path('/tmp/vigia-cv-real-eval.json')
+print(report.read_text(encoding='utf-8')[-1000:] if report.exists() else 'sem relatório de avaliação CV')
+PY
+    exit 1
+  fi
+  python3 - <<'PY'
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+text = Path('/tmp/vigia-cv-real-eval.json').read_text(encoding='utf-8')
+payload = json.loads(text[text.find('{'):])
+ppe = payload['ppe_violation']
+coverage = payload['coverage_summary']
+print(
+    'CI smoke: CV real OK '
+    f"samples={coverage['total_samples']} helmet={coverage['helmet_samples']} "
+    f"empty={coverage['empty_samples']} recall={ppe['recall']} precision={ppe['precision']}"
+)
+PY
+elif [[ "${CV_REAL_EVAL_REQUIRED:-0}" == "1" ]]; then
+  echo "CI smoke: modelo CV real obrigatório não encontrado em ${eval_model}."
+  exit 1
+else
+  echo "CI smoke: avaliação CV real ignorada (modelo não encontrado em ${eval_model})."
+fi
+
 echo "CI smoke: aplicando migrations em banco limpo..."
 docker compose -p "$project_name" -f "$compose_file" run --rm migrate
 

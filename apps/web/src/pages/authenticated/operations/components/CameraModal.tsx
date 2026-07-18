@@ -53,8 +53,9 @@ export function CameraModal({
           key={camera?.id ?? 'nova'}
           sites={sites}
           defaultSiteId={defaultSiteId}
-          initial={camera ? { site_id: camera.site_id, name: camera.name, stream_identifier: camera.stream_identifier, status: camera.status } : undefined}
+          initial={camera ? { site_id: camera.site_id, name: camera.name, stream_identifier: '', status: camera.status } : undefined}
           submitLabel={editando ? 'Salvar câmera' : 'Criar câmera'}
+          requireStream={!editando}
           onSubmit={onSubmit}
           onCancel={onClose}
         />

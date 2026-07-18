@@ -3,11 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-try:
-    from sqlalchemy import func, select
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
-    func = None  # type: ignore[assignment]
+from sqlalchemy import func, select
 
 from ..domain.operations import Camera, Department, EntityStatus, OperationInUse, RequiredPPE, SafetyRule, Site, Worker, Zone, ZoneType
 from .models import Camera as CameraRow
@@ -107,7 +103,7 @@ class SqlAlchemyOperationsRepository:
         return site
 
     def list_sites(self, organization_id: str) -> list[Site]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[Site] = []
@@ -127,7 +123,7 @@ class SqlAlchemyOperationsRepository:
         return dept
 
     def list_departments(self, organization_id: str) -> list[Department]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[Department] = []
@@ -155,7 +151,7 @@ class SqlAlchemyOperationsRepository:
         return worker
 
     def list_workers(self, organization_id: str) -> list[Worker]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[Worker] = []
@@ -198,7 +194,7 @@ class SqlAlchemyOperationsRepository:
         return camera
 
     def list_cameras(self, organization_id: str) -> list[Camera]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[Camera] = []
@@ -253,7 +249,7 @@ class SqlAlchemyOperationsRepository:
         return zone
 
     def list_zones(self, organization_id: str) -> list[Zone]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[Zone] = []
@@ -279,7 +275,7 @@ class SqlAlchemyOperationsRepository:
         return rule
 
     def list_safety_rules(self, organization_id: str) -> list[SafetyRule]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[SafetyRule] = []
@@ -309,7 +305,7 @@ class SqlAlchemyOperationsRepository:
         return ppe
 
     def list_required_ppe(self, organization_id: str) -> list[RequiredPPE]:
-        if self.session_factory is None or select is None:
+        if self.session_factory is None:
             return []
         with self.session_factory() as session:
             items: list[RequiredPPE] = []

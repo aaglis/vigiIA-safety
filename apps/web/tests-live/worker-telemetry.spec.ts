@@ -19,5 +19,6 @@ test('aba Workers mostra a telemetria real do heartbeat', async ({ page }) => {
 
   const texto = await telemetria.innerText()
   expect(texto).toMatch(/ms/)
+  expect(texto).toMatch(/Envio/)
   console.log(`[telemetria] ${texto.replace(/\n/g, ' ')}`)
 })

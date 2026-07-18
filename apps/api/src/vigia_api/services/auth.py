@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from uuid import uuid4
 
-from ..domain.auth import AuthTokens, AuthenticatedUser, MembershipSummary, OrganizationSummary, Permission, User, UserSession, PlatformRole
+from ..domain.auth import AuthTokens, AuthenticatedUser, MembershipSummary, OrganizationSummary, User, UserSession, PlatformRole
 from ..settings import Settings, settings
 from ..observability import log_event
 from .security import decode_jwt, encode_jwt, generate_token, hash_password, hash_token, verify_password
@@ -12,7 +12,7 @@ from ..security.permissions import role_permissions
 
 
 def _permissions_for_role(role: str):
-    return [Permission(p) for p in role_permissions(role) if p in Permission._value2member_map_]
+    return sorted(role_permissions(role))
 
 
 class InMemoryAuthRepository:
@@ -28,7 +28,7 @@ class InMemoryAuthRepository:
         user = User(id="user-dev", email="admin@vigia.local", full_name="VigIA Admin", password_hash=hash_password("change-me-dev"))
         self.add_user(user)
         org = OrganizationSummary(id="org-dev", name="VigIA Local", slug="vigia-local")
-        self.memberships[user.id] = [MembershipSummary(organization=org, role="owner", permissions=[Permission.VIEW_DASHBOARD, Permission.MANAGE_USERS, Permission.MANAGE_ORG], active=True)]
+        self.memberships[user.id] = [MembershipSummary(organization=org, role="owner", permissions=_permissions_for_role("owner"), active=True)]
 
     def add_user(self, user: User) -> None:
         self.users[user.id] = user
@@ -41,7 +41,7 @@ class InMemoryAuthRepository:
     def add_membership(self, organization_id: str, user_id: str, role: str, permissions: list | None = None) -> MembershipSummary:
         """Mesma interface do repositório SQL: idempotente por (org, user)."""
         org = OrganizationSummary(id=organization_id, name=organization_id, slug=organization_id)
-        membership = MembershipSummary(organization=org, role=role, permissions=permissions or [Permission.VIEW_DASHBOARD], active=True)
+        membership = MembershipSummary(organization=org, role=role, permissions=permissions or _permissions_for_role(role), active=True)
         current = self.memberships.setdefault(user_id, [])
         for index, existing in enumerate(current):
             if existing.organization.id == organization_id:
@@ -161,12 +161,12 @@ class AuthService:
         return {
             "organization": {"id": membership.organization.id, "name": membership.organization.name, "slug": membership.organization.slug},
             "role": membership.role,
-            "permissions": [p.value for p in membership.permissions],
+            "permissions": _permissions_for_role(membership.role),
             "active": membership.active,
         }
 
     def _serialize_member(self, user: User, membership: MembershipSummary) -> dict[str, Any]:
-        return {"user": {"id": user.id, "email": user.email, "full_name": user.full_name}, "organization": {"id": membership.organization.id, "name": membership.organization.name, "slug": membership.organization.slug}, "role": membership.role, "permissions": [p.value for p in membership.permissions], "active": membership.active}
+        return {"user": {"id": user.id, "email": user.email, "full_name": user.full_name}, "organization": {"id": membership.organization.id, "name": membership.organization.name, "slug": membership.organization.slug}, "role": membership.role, "permissions": _permissions_for_role(membership.role), "active": membership.active}
 
     def list_organization_memberships(self, organization_id: str) -> list[dict[str, Any]]:
         getter = getattr(self.repository, "list_organization_memberships", None)
@@ -236,5 +236,5 @@ class AuthService:
             "user": self._serialize_user(current.user),
             "memberships": [self._serialize_membership(m) for m in current.memberships],
             "active_organization": {"id": active_membership.organization.id, "name": active_membership.organization.name, "slug": active_membership.organization.slug} if active_membership else None,
-            "active_permissions": [p.value for p in active_membership.permissions] if active_membership else [],
+            "active_permissions": _permissions_for_role(active_membership.role) if active_membership else [],
         }

@@ -37,3 +37,6 @@ apps/web/tests-live/.auth/
 .agents/
 .claude/skills/
 skills-lock.json
+
+# API dependency lockfile is versioned intentionally; keep apps/api/uv.lock tracked.
+!apps/api/uv.lock

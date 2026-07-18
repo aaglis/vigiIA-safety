@@ -36,9 +36,10 @@ class DetectionCooldown:
         current = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         key = (camera_id, zone_id, event_type)
         last = self._last_seen.get(key)
-        if last is not None and (current - last).total_seconds() < self.cooldown_seconds:
+        if last is not None and current != last and (current - last).total_seconds() < self.cooldown_seconds:
             return False
-        self._last_seen[key] = current
+        if last is None or current > last:
+            self._last_seen[key] = current
         return True
 
 

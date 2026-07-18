@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-try:
-    from sqlalchemy import select  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover
-    select = None  # type: ignore[assignment]
+from sqlalchemy import select
 
 from ..domain.platform import Organization, OrganizationStatus
 from .models import Organization as OrganizationRow
@@ -62,8 +59,6 @@ class SqlAlchemyPlatformRepository:
             return self._to_domain(session.get(OrganizationRow, organization_id))
 
     def list_all(self) -> list[Organization]:
-        if select is None:
-            return []
         with self.session_factory() as session:
             rows = session.execute(select(OrganizationRow)).scalars().all()
             return [org for org in (self._to_domain(row) for row in rows) if org is not None]

@@ -9,12 +9,12 @@ export function labelZoneType(zoneType: OperationZoneType) {
   return zoneType === 'access' ? 'Acesso' : zoneType === 'restricted' ? 'Restrita' : 'EPI'
 }
 
-// Deriva o tipo de fonte de vídeo a partir do identificador do stream real da câmera.
-export function cameraSource(stream: string): { label: string; bg: string; color: string } {
-  const value = (stream ?? '').toLowerCase()
+// Deriva o tipo de fonte a partir do campo público `stream_source_type` da API.
+export function cameraSource(sourceType?: string | null): { label: string; bg: string; color: string } {
+  const value = (sourceType ?? '').toLowerCase()
   if (value.startsWith('rtsp')) return { label: 'RTSP', bg: '#EAF0F5', color: '#2C4C74' }
   if (value.startsWith('rtmp')) return { label: 'RTMP', bg: '#EAF0F5', color: '#2C4C74' }
-  if (/\.(mp4|mov|avi|mkv|webm)(\?|#|$)/.test(value) || value.includes('demo') || value.includes('test') || value.includes('sample')) {
+  if (value === 'video') {
     return { label: 'VÍDEO TESTE', bg: '#F3E9D6', color: '#946416' }
   }
   if (value.startsWith('http')) return { label: 'HTTP', bg: '#EAF0F5', color: '#2C4C74' }

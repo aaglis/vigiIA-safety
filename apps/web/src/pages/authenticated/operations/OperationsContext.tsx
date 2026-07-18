@@ -43,7 +43,7 @@ export type OperationsContextValue = {
   onCreateCamera: (payload: { site_id: string; name: string; stream_identifier: string; status?: OperationEntityStatus }) => Promise<unknown>
   onCreateZone: (payload: CreateZoneInput) => Promise<unknown>
   onUpdateSite: (id: string, payload: { name: string; address?: string | null; status?: OperationEntityStatus }) => Promise<unknown>
-  onUpdateCamera: (id: string, payload: { site_id: string; name: string; stream_identifier: string; status?: OperationEntityStatus }) => Promise<unknown>
+  onUpdateCamera: (id: string, payload: { site_id: string; name: string; stream_identifier?: string; status?: OperationEntityStatus }) => Promise<unknown>
   onUpdateZone: (id: string, payload: CreateZoneInput) => Promise<unknown>
   /** Rejeita com ApiError 409 quando há histórico apontando para o cadastro. */
   onDeleteZone: (id: string) => Promise<unknown>

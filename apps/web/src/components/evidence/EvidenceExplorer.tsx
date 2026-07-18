@@ -1,4 +1,5 @@
 import type { EvidenceItem } from '../../api/evidence'
+import type { PageInfo } from '../../api/types'
 import { Icon } from '../ui/icons'
 import { formatBytes, formatClock, formatTimestamp, readMetadataValue } from '../../utils/formatters'
 
@@ -22,9 +23,12 @@ export function EvidenceExplorer({
   evidenceDownloadUrl,
   evidenceDownloadLoading,
   evidenceDownloadError,
+  evidencePageInfo,
+  evidenceLoadingMore,
   onSelectEvidence,
   onOpenEvidence,
   onRetry,
+  onLoadMoreEvidence,
 }: {
   incident: unknown
   organizationName: string | null
@@ -35,9 +39,12 @@ export function EvidenceExplorer({
   evidenceDownloadUrl: string | null
   evidenceDownloadLoading: boolean
   evidenceDownloadError: string | null
+  evidencePageInfo: PageInfo | null
+  evidenceLoadingMore: boolean
   onSelectEvidence: (fileId: string) => void
   onOpenEvidence: () => void
   onRetry: () => void
+  onLoadMoreEvidence: () => void
 }) {
   const metadata = selectedEvidence?.metadata ?? {}
   const contentType = selectedEvidence?.media_type ?? readMetadataValue(metadata, 'content_type') ?? '—'
@@ -45,6 +52,7 @@ export function EvidenceExplorer({
   const kindLabel = selectedEvidence ? getEvidenceLabel(selectedEvidence) : 'Evidência'
   const hasImagePreview = Boolean(evidenceDownloadUrl && selectedEvidence?.media_type.startsWith('image/'))
   const released = Boolean(evidenceDownloadUrl)
+  const evidenceProgressLabel = evidencePageInfo ? `Exibindo ${evidenceItems.length} de ${evidencePageInfo.total} arquivos` : `${evidenceItems.length} arquivos`
 
   return (
     <div className="grid gap-3.5 xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -52,7 +60,7 @@ export function EvidenceExplorer({
       <div className="flex flex-col overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--card)]">
         <div className="flex items-center justify-between border-b border-[color:var(--divider)] px-4 py-3">
           <span className="font-display text-[14px] font-bold text-[var(--ink)]">Arquivos</span>
-          <span className="font-mono-ui text-[11px] text-[var(--label)]">{evidenceItems.length} {evidenceItems.length === 1 ? 'item' : 'itens'}</span>
+          <span className="font-mono-ui text-[11px] text-[var(--label)]">{evidenceProgressLabel}</span>
         </div>
         <div className="flex-1 overflow-auto p-2">
           {evidenceLoading ? (
@@ -90,6 +98,21 @@ export function EvidenceExplorer({
             })
           )}
         </div>
+        {evidencePageInfo || evidenceItems.length > 0 || evidenceLoading ? (
+          <div className="flex items-center justify-between gap-3 border-t border-[color:var(--divider)] px-4 py-3">
+            <span className="font-mono-ui text-[11px] text-[var(--label)]">{evidenceProgressLabel}</span>
+            {evidencePageInfo?.has_next ? (
+              <button
+                type="button"
+                onClick={onLoadMoreEvidence}
+                disabled={evidenceLoadingMore}
+                className="inline-flex h-8 items-center rounded-[8px] border border-[color:var(--line)] bg-[var(--paper)] px-3 text-[12px] font-medium text-[var(--ink)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {evidenceLoadingMore ? 'Carregando…' : 'Carregar mais'}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {evidenceError ? (
           <div className="border-t border-[color:var(--divider)] px-4 py-3 text-[12px] text-[#9e4120]">
             <p>{evidenceError}</p>

@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Metadata } from './types'
+import type { Metadata, PageInfo } from './types'
 
 export type IncidentStatus = 'open' | 'acknowledged' | 'resolved' | 'dismissed'
 
@@ -38,19 +38,12 @@ export interface AuditLogEntry {
 
 export interface IncidentListResponse {
   items: Incident[]
-  page_info?: PageInfo
+  page_info: PageInfo
 }
 
 export interface AuditLogResponse {
   items: AuditLogEntry[]
-  page_info?: PageInfo
-}
-
-export interface PageInfo {
-  limit: number
-  offset: number
-  total: number
-  has_next: boolean
+  page_info: PageInfo
 }
 
 export interface IncidentListParams {

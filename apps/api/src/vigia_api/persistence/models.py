@@ -3,16 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-try:
-    from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, MetaData, String, Text, UniqueConstraint
-    from sqlalchemy.orm import Mapped, mapped_column, relationship
-except Exception:  # pragma: no cover
-    Boolean = DateTime = Float = ForeignKey = Integer = MetaData = String = Text = UniqueConstraint = object  # type: ignore[assignment]
-    Mapped = object  # type: ignore[assignment]
-    def mapped_column(*args, **kwargs):  # type: ignore[no-redef]
-        return None
-    def relationship(*args, **kwargs):  # type: ignore[no-redef]
-        return None
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, MetaData, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
 
@@ -92,7 +84,15 @@ class EdgeWorker(Base):
 
 class Incident(Base):
     __tablename__ = "incidents"
-    __table_args__ = (UniqueConstraint("organization_id", "detection_event_id", name="uq_incidents_org_detection_event"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "detection_event_id", name="uq_incidents_org_detection_event"),
+        Index("ix_incidents_org_created_id", "organization_id", "created_at", "id"),
+        Index("ix_incidents_org_status_created_id", "organization_id", "status", "created_at", "id"),
+        Index("ix_incidents_org_site_created_id", "organization_id", "site_id", "created_at", "id"),
+        Index("ix_incidents_org_camera_created_id", "organization_id", "camera_id", "created_at", "id"),
+        Index("ix_incidents_org_zone_created_id", "organization_id", "zone_id", "created_at", "id"),
+        Index("ix_incidents_org_severity_created_id", "organization_id", "severity", "created_at", "id"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
@@ -133,6 +133,10 @@ class IncidentAuditLog(Base):
 
 class EvidenceMetadata(Base):
     __tablename__ = "evidence_metadata"
+    __table_args__ = (
+        Index("ix_evidence_metadata_org_created_id", "organization_id", "created_at", "id"),
+        Index("ix_evidence_metadata_org_incident_created_id", "organization_id", "incident_id", "created_at", "id"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)

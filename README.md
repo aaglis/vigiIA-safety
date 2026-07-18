@@ -111,6 +111,15 @@ npm --workspace apps/web run test:e2e
 
 Os testes da API usam repositório em memória por default (`REPOSITORY_BACKEND=memory`); o compose usa Postgres.
 
+> `apps/api/uv.lock` é parte do código da API e deve ser versionado sempre que as dependências Python mudarem. Já `.env` e overrides de compose continuam locais, fora do Git, com segredos reais vindos de ambiente ou secret manager.
+
+Para checar os fluxos críticos contra Postgres real sem deixar o gate local pesado:
+
+```bash
+export POSTGRES_TEST_DATABASE_URL="postgresql+psycopg://vigia:vigia@127.0.0.1:5432/vigia_test"
+bash scripts/postgres-integration-tests.sh
+```
+
 ## Documentação
 
 Comece por aqui:

@@ -1,4 +1,5 @@
 import type { IncidentListParams } from './incidents'
+import type { EvidenceListParams } from './evidence'
 
 export const queryKeys = {
   health: ['health'] as const,
@@ -8,7 +9,7 @@ export const queryKeys = {
   incidents: (orgId: string, filters: IncidentListParams) => ['incidents', orgId, filters] as const,
   incidentDetail: (orgId: string, incidentId: string) => ['incident-detail', orgId, incidentId] as const,
   incidentAudit: (orgId: string, incidentId: string) => ['incident-audit', orgId, incidentId] as const,
-  evidence: (orgId: string, incidentId: string) => ['evidence', orgId, incidentId] as const,
+  evidence: (orgId: string, incidentId: string, params: EvidenceListParams = {}) => ['evidence', orgId, incidentId, params] as const,
   operationsCatalog: (orgId: string) => ['operations-catalog', orgId] as const,
   invites: (orgId: string) => ['invites', orgId] as const,
   members: (orgId: string) => ['members', orgId] as const,

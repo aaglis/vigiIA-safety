@@ -19,6 +19,9 @@ services:
       EDGE_WORKER_API_KEY: ${EDGE_WORKER_API_KEY:?set EDGE_WORKER_API_KEY in the environment}
       INCIDENT_NOTIFICATION_ENABLED: ${INCIDENT_NOTIFICATION_ENABLED:-false}
       INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-alerts@vigia.local}
+      INCIDENT_NOTIFICATION_RECIPIENTS: '${INCIDENT_NOTIFICATION_RECIPIENTS:-["ops@vigia.local"]}'
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       ALLOW_INTERNAL_S3_ENDPOINT: ${ALLOW_INTERNAL_S3_ENDPOINT:-true}
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -55,6 +58,9 @@ services:
       EDGE_WORKER_API_KEY: ${EDGE_WORKER_API_KEY:?set EDGE_WORKER_API_KEY in the environment}
       INCIDENT_NOTIFICATION_ENABLED: ${INCIDENT_NOTIFICATION_ENABLED:-false}
       INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-alerts@vigia.local}
+      INCIDENT_NOTIFICATION_RECIPIENTS: '${INCIDENT_NOTIFICATION_RECIPIENTS:-["ops@vigia.local"]}'
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       ALLOW_INTERNAL_S3_ENDPOINT: ${ALLOW_INTERNAL_S3_ENDPOINT:-true}
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -66,6 +72,39 @@ services:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
+
+  scheduler:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      REPOSITORY_BACKEND: postgres
+      RATE_LIMIT_BACKEND: redis
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://vigia:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/vigia}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS as a JSON array, e.g. ["https://pdc.example.com"]}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?set REFRESH_TOKEN_SECRET in the environment}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN in the environment}
+      EDGE_WORKER_CLIENT_ID: ${EDGE_WORKER_CLIENT_ID:?set EDGE_WORKER_CLIENT_ID in the environment}
+      EDGE_WORKER_API_KEY: ${EDGE_WORKER_API_KEY:?set EDGE_WORKER_API_KEY in the environment}
+      INCIDENT_NOTIFICATION_ENABLED: ${INCIDENT_NOTIFICATION_ENABLED:-false}
+      INCIDENT_NOTIFICATION_MODE: ${INCIDENT_NOTIFICATION_MODE:-mock}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      ALLOW_INTERNAL_S3_ENDPOINT: ${ALLOW_INTERNAL_S3_ENDPOINT:-true}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      EVIDENCE_BUCKET_NAME: ${EVIDENCE_BUCKET_NAME:-evidence-private}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY or S3_ACCESS_KEY_ID}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY or S3_SECRET_ACCESS_KEY}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "vigia_api.scripts.jobs_scheduler"]
 
   web:
     build:
@@ -105,7 +144,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}}
@@ -119,7 +158,7 @@ services:
       retries: 20
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
     restart: "no"
     depends_on:
       minio:

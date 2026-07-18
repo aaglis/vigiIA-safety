@@ -1,0 +1,519 @@
+{
+  "version": "cv-real/v2",
+  "fonte": "Misto: 3 frames reais de fábrica têxtil do vídeo demo + 30 imagens selecionadas do RF100/Roboflow construction-safety-gsnvb v1 (HF mirror LibreYOLO/construction-safety-gsnvb), licença CC-BY-4.0.",
+  "como_foi_anotado": "Ground truth em nível de frame para a decisão do produto: há violação de capacete? Para RF100, pessoas/capacetes vêm dos labels YOLO originais; para os 3 frames têxteis, inspeção visual humana. Labels YOLO do subconjunto RF100 foram preservados em labels/obra para auditoria.",
+  "criterios_de_amostragem": [
+    "Manter o dataset pequeno o bastante para versionar e rodar no CI (~2 MiB), sem commitar o RF100 inteiro.",
+    "Incluir pessoas usando capacete para medir falso positivo de EPI.",
+    "Incluir pessoas sem capacete e cenas mistas para medir recall.",
+    "Incluir frames sem pessoa anotada para medir alarme fantasma.",
+    "Misturar cenário têxtil interno/luz artificial e cenário de obra público."
+  ],
+  "cobertura_planejada": {
+    "min_amostras": 30,
+    "min_com_capacete": 1,
+    "min_sem_pessoa": 1,
+    "cenarios": [
+      "textil",
+      "obra"
+    ]
+  },
+  "limitacoes_conhecidas": [
+    "Ainda é uma amostra pequena; 33 frames não bastam para publicar taxa geral de mercado.",
+    "O cenário obra vem de dataset público de construção; ainda não cobre pátio real do cliente nem turno noturno.",
+    "Frames RF100 sem pessoa anotada podem conter EPIs isolados/anotações sem bbox de person; contam como negativo de pessoa para alarme fantasma, não como cena vazia perfeita.",
+    "Métrica é por frame e decisão de produto; não substitui mAP de bbox nem valida geometria de zona com polígonos reais."
+  ],
+  "samples": [
+    {
+      "id": "textil-f01",
+      "file": "frames/textil/f01.jpg",
+      "scenario": "textil",
+      "tags": [
+        "camera-alta",
+        "luz-artificial",
+        "sem-capacete"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "Frame real de fábrica têxtil; pessoa principal sem capacete, pessoa ao fundo pequena/borrada."
+    },
+    {
+      "id": "textil-f05",
+      "file": "frames/textil/f05.jpg",
+      "scenario": "textil",
+      "tags": [
+        "camera-alta",
+        "luz-artificial",
+        "sem-capacete",
+        "falso-negativo-investigar"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 2,
+      "ha_violacao_epi": true,
+      "notas": "Duas pessoas sem capacete; caso histórico de falso negativo do detector para NO-Hardhat."
+    },
+    {
+      "id": "textil-f09",
+      "file": "frames/textil/f09.jpg",
+      "scenario": "textil",
+      "tags": [
+        "camera-alta",
+        "luz-artificial",
+        "sem-capacete"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "Pessoa em primeiro plano sem capacete; fundo sem pessoa identificável."
+    },
+    {
+      "id": "obra-rf100-01",
+      "file": "frames/obra/ppe_0781_jpg.rf.c4f370f195cdf859b70f3db395c5c309.jpg",
+      "label_file": "labels/obra/ppe_0781_jpg.rf.c4f370f195cdf859b70f3db395c5c309.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-pessoa-anotada",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 0,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 3, 'no-helmet': 0, 'no-vest': 3, 'person': 0, 'vest': 3}"
+    },
+    {
+      "id": "obra-rf100-02",
+      "file": "frames/obra/ppe_0901_jpg.rf.cec7bff9ebf2b8ed7df61d8a2b513403.jpg",
+      "label_file": "labels/obra/ppe_0901_jpg.rf.cec7bff9ebf2b8ed7df61d8a2b513403.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-pessoa-anotada",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 0,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 0, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-03",
+      "file": "frames/obra/ppe_0008_jpg.rf.628c03cd91df99daf62577fddb1d3032.jpg",
+      "label_file": "labels/obra/ppe_0008_jpg.rf.628c03cd91df99daf62577fddb1d3032.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 4,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 3,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 0, 'no-helmet': 3, 'no-vest': 0, 'person': 4, 'vest': 4}"
+    },
+    {
+      "id": "obra-rf100-04",
+      "file": "frames/obra/ppe_0014_jpg.rf.85eab056e0d78bf348203a261683723f.jpg",
+      "label_file": "labels/obra/ppe_0014_jpg.rf.85eab056e0d78bf348203a261683723f.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-capacete"
+      ],
+      "pessoas_esperadas": 5,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 5,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 0, 'no-helmet': 5, 'no-vest': 0, 'person': 5, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-05",
+      "file": "frames/obra/ppe_0133_jpg.rf.613ef76747b8df06c856db4388628798.jpg",
+      "label_file": "labels/obra/ppe_0133_jpg.rf.613ef76747b8df06c856db4388628798.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-capacete"
+      ],
+      "pessoas_esperadas": 3,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 3,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 0, 'no-helmet': 3, 'no-vest': 0, 'person': 3, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-06",
+      "file": "frames/obra/ppe_0701_jpg.rf.bf04940bcfa009a8f86f52d706fee7e1.jpg",
+      "label_file": "labels/obra/ppe_0701_jpg.rf.bf04940bcfa009a8f86f52d706fee7e1.txt",
+      "scenario": "obra",
+      "tags": [
+        "sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 4,
+      "pessoas_com_capacete": 0,
+      "pessoas_sem_capacete": 4,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 0, 'no-helmet': 4, 'no-vest': 0, 'person': 4, 'vest': 4}"
+    },
+    {
+      "id": "obra-rf100-07",
+      "file": "frames/obra/ppe_0357_jpg.rf.050090d9456aba1025eed0758342caba.jpg",
+      "label_file": "labels/obra/ppe_0357_jpg.rf.050090d9456aba1025eed0758342caba.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete"
+      ],
+      "pessoas_esperadas": 11,
+      "pessoas_com_capacete": 9,
+      "pessoas_sem_capacete": 3,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 9, 'no-helmet': 3, 'no-vest': 0, 'person': 11, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-08",
+      "file": "frames/obra/ppe_0517_jpg.rf.31dec7e07babdce093ed10be6e32c947.jpg",
+      "label_file": "labels/obra/ppe_0517_jpg.rf.31dec7e07babdce093ed10be6e32c947.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 4,
+      "pessoas_com_capacete": 3,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 3, 'no-helmet': 1, 'no-vest': 4, 'person': 4, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-09",
+      "file": "frames/obra/ppe_0576_jpg.rf.ca9c0a8ef15232d96d27a04d770f590a.jpg",
+      "label_file": "labels/obra/ppe_0576_jpg.rf.ca9c0a8ef15232d96d27a04d770f590a.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 1, 'no-vest': 2, 'person': 2, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-10",
+      "file": "frames/obra/ppe_0633_jpg.rf.f8e000ed591c46262c050a12e1bb4b90.jpg",
+      "label_file": "labels/obra/ppe_0633_jpg.rf.f8e000ed591c46262c050a12e1bb4b90.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 3,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 1, 'no-vest': 1, 'person': 3, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-11",
+      "file": "frames/obra/ppe_0637_jpg.rf.97f0db95f18516da611dd79640c16ec2.jpg",
+      "label_file": "labels/obra/ppe_0637_jpg.rf.97f0db95f18516da611dd79640c16ec2.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 3,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 1, 'no-vest': 3, 'person': 3, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-12",
+      "file": "frames/obra/ppe_0745_jpg.rf.cc01d794f1d65ff92ba4e06d7c2aa182.jpg",
+      "label_file": "labels/obra/ppe_0745_jpg.rf.cc01d794f1d65ff92ba4e06d7c2aa182.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 1, 'no-vest': 1, 'person': 2, 'vest': 1}"
+    },
+    {
+      "id": "obra-rf100-13",
+      "file": "frames/obra/ppe_0828_jpg.rf.a09bcee628512d6bb9a44fe2afd8b19f.jpg",
+      "label_file": "labels/obra/ppe_0828_jpg.rf.a09bcee628512d6bb9a44fe2afd8b19f.txt",
+      "scenario": "obra",
+      "tags": [
+        "capacete-e-sem-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 1,
+      "ha_violacao_epi": true,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 1, 'no-vest': 1, 'person': 2, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-14",
+      "file": "frames/obra/ppe_0000_jpg.rf.12dba82119baadab649f2fb1fda2afff.jpg",
+      "label_file": "labels/obra/ppe_0000_jpg.rf.12dba82119baadab649f2fb1fda2afff.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 1, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-15",
+      "file": "frames/obra/ppe_0004_jpg.rf.15485d516145ed09a31de9762ed5b908.jpg",
+      "label_file": "labels/obra/ppe_0004_jpg.rf.15485d516145ed09a31de9762ed5b908.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 3,
+      "pessoas_com_capacete": 3,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 3, 'no-helmet': 0, 'no-vest': 0, 'person': 3, 'vest': 3}"
+    },
+    {
+      "id": "obra-rf100-16",
+      "file": "frames/obra/ppe_0009_jpg.rf.f4e0d47f883e624b2d5fa39827068a1c.jpg",
+      "label_file": "labels/obra/ppe_0009_jpg.rf.f4e0d47f883e624b2d5fa39827068a1c.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 0, 'person': 2, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-17",
+      "file": "frames/obra/ppe_0013_jpg.rf.8b5f9624055be39335d2ac101a8efe0d.jpg",
+      "label_file": "labels/obra/ppe_0013_jpg.rf.8b5f9624055be39335d2ac101a8efe0d.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 1}"
+    },
+    {
+      "id": "obra-rf100-18",
+      "file": "frames/obra/ppe_0038_jpg.rf.54e8b1b9118cfc56b4a4a3606995e749.jpg",
+      "label_file": "labels/obra/ppe_0038_jpg.rf.54e8b1b9118cfc56b4a4a3606995e749.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 4,
+      "pessoas_com_capacete": 4,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 4, 'no-helmet': 0, 'no-vest': 0, 'person': 4, 'vest': 4}"
+    },
+    {
+      "id": "obra-rf100-19",
+      "file": "frames/obra/ppe_0058_jpg.rf.6b664ceeecb738030410e6c8ad437e16.jpg",
+      "label_file": "labels/obra/ppe_0058_jpg.rf.6b664ceeecb738030410e6c8ad437e16.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 0, 'person': 2, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-20",
+      "file": "frames/obra/ppe_0094_jpg.rf.70eebbf9f36a320e714f9a9a40deac83.jpg",
+      "label_file": "labels/obra/ppe_0094_jpg.rf.70eebbf9f36a320e714f9a9a40deac83.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 1}"
+    },
+    {
+      "id": "obra-rf100-21",
+      "file": "frames/obra/ppe_0104_jpg.rf.d589e1f61aab64efa1ae862816a2aa85.jpg",
+      "label_file": "labels/obra/ppe_0104_jpg.rf.d589e1f61aab64efa1ae862816a2aa85.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-22",
+      "file": "frames/obra/ppe_0106_jpg.rf.cd7b73b2a639c3a378ae17ced954af00.jpg",
+      "label_file": "labels/obra/ppe_0106_jpg.rf.cd7b73b2a639c3a378ae17ced954af00.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-23",
+      "file": "frames/obra/ppe_0119_jpg.rf.f172e3c781ee020ed54ee900c568dae9.jpg",
+      "label_file": "labels/obra/ppe_0119_jpg.rf.f172e3c781ee020ed54ee900c568dae9.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 3,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 0, 'person': 3, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-24",
+      "file": "frames/obra/ppe_0120_jpg.rf.c1387f72418919f8597314f6ac59e47f.jpg",
+      "label_file": "labels/obra/ppe_0120_jpg.rf.c1387f72418919f8597314f6ac59e47f.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 1, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-25",
+      "file": "frames/obra/ppe_0126_jpg.rf.3d578fb21fd9030ac2bba6f93fa74f4a.jpg",
+      "label_file": "labels/obra/ppe_0126_jpg.rf.3d578fb21fd9030ac2bba6f93fa74f4a.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-26",
+      "file": "frames/obra/ppe_0139_jpg.rf.2eace862fe7fa509ae645749aa7a551c.jpg",
+      "label_file": "labels/obra/ppe_0139_jpg.rf.2eace862fe7fa509ae645749aa7a551c.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 1}"
+    },
+    {
+      "id": "obra-rf100-27",
+      "file": "frames/obra/ppe_0147_jpg.rf.be1c6f535df719778977dc2b6d4ed6c0.jpg",
+      "label_file": "labels/obra/ppe_0147_jpg.rf.be1c6f535df719778977dc2b6d4ed6c0.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 1, 'person': 1, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-28",
+      "file": "frames/obra/ppe_0158_jpg.rf.04f383e51f7dff109b1439239bb91878.jpg",
+      "label_file": "labels/obra/ppe_0158_jpg.rf.04f383e51f7dff109b1439239bb91878.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 0, 'person': 2, 'vest': 2}"
+    },
+    {
+      "id": "obra-rf100-29",
+      "file": "frames/obra/ppe_0171_jpg.rf.bb6982cbffc47b5660e1a0b92a873b21.jpg",
+      "label_file": "labels/obra/ppe_0171_jpg.rf.bb6982cbffc47b5660e1a0b92a873b21.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 2,
+      "pessoas_com_capacete": 2,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 2, 'no-helmet': 0, 'no-vest': 2, 'person': 2, 'vest': 0}"
+    },
+    {
+      "id": "obra-rf100-30",
+      "file": "frames/obra/ppe_0175_jpg.rf.9d747976b7e785d865c2416adccdb662.jpg",
+      "label_file": "labels/obra/ppe_0175_jpg.rf.9d747976b7e785d865c2416adccdb662.txt",
+      "scenario": "obra",
+      "tags": [
+        "com-capacete",
+        "colete-anotado"
+      ],
+      "pessoas_esperadas": 1,
+      "pessoas_com_capacete": 1,
+      "pessoas_sem_capacete": 0,
+      "ha_violacao_epi": false,
+      "notas": "RF100 construction-safety-gsnvb test split; labels: {'helmet': 1, 'no-helmet': 0, 'no-vest': 0, 'person': 1, 'vest': 1}"
+    }
+  ]
+}

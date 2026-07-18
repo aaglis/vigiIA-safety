@@ -3,6 +3,19 @@
 O worker carrega o modelo YOLO indicado por `CV_MODEL_PATH`. Os pesos **não são
 versionados** (`.gitignore`) — baixe conforme abaixo.
 
+## Manifest de supply-chain
+
+Antes de carregar o YOLO, o worker valida o `.pt` contra `apps/edge-worker/models/manifest.json`
+(montado em `/models/manifest.json` no container). Cada entrada precisa bater em
+`filename`, `version` e `sha256`.
+
+- `CV_MODEL_MANIFEST_PATH` pode apontar para outro manifesto; se vazio, o worker usa
+  `<CV_MODEL_PATH>/../manifest.json`.
+- Se o arquivo sumir, o nome não existir no manifesto ou o SHA256 divergir, o worker
+  falha antes de importar/carregar `ultralytics.YOLO`.
+- Para atualizar um modelo, baixe o `.pt`, calcule `sha256sum`, atualize o manifesto e
+  só então altere `CV_MODEL_PATH`/`CV_REAL_MODEL_VERSION`.
+
 ## Padrão do compose: `ppe-multiclass.pt`
 
 ```bash
@@ -14,10 +27,28 @@ Classes: `Hardhat`, `Mask`, `NO-Hardhat`, `NO-Mask`, `NO-Safety Vest`, `Person`,
 `Safety Cone`, `Safety Vest`, `machinery`, `vehicle`.
 
 Cobre **os dois cenários numa inferência só**: `Person` → intrusão em zona restrita,
-`NO-Hardhat`/`Hardhat` → EPI capacete. Licença do modelo: MIT.
+`NO-Hardhat`/`Hardhat` → EPI capacete. Licença do metadata local: **AGPL-3.0**
+(verifique a licença do repositório de origem antes de uso comercial).
 
 O `_category_for` mapeia por substring, então `Person`/`Hardhat`/`NO-Hardhat` são
 reconhecidos sem mudar código; as demais classes são ignoradas.
+
+## Validação segura do contrato do modelo
+
+Sem carregar `torch`, `ultralytics` ou `cv2`, você pode validar o contrato do `.pt`:
+
+```bash
+PYTHONPATH=apps/edge-worker/src python3 -m vigia_edge_worker.model_contract \
+  apps/edge-worker/models/ppe-multiclass.pt
+```
+
+O comando inspeciona o zip/pickle como bytes, extrai strings e confirma se o arquivo
+cobre `person`, `helmet` e `no_helmet` no contrato de produto.
+
+Saída: JSON com `classes`, `categories`, `supports_restricted_intrusion`,
+`supports_ppe_helmet`, `supports_product_contract`, `license` e `warnings`.
+
+Exit code `0` = contrato ok; `1` = arquivo inválido ou falta classe/categoria.
 
 ## Por que um modelo só importa
 
@@ -52,11 +83,14 @@ usar qualquer modelo novo:
 2. **Carregue com allowlist explícita** (`torch.serialization.add_safe_globals` +
    `weights_only=True`): o torch recusa o arquivo se ele pedir algo fora da lista.
 
-3. **Carregue primeiro dentro do container**, nunca direto na máquina do dev — `/models`
+3. **Para inferência real, instale `.[cv]` ou rode o container**. No host sem essas
+   dependências, a validação fica limitada ao contrato estático acima.
+
+4. **Carregue primeiro dentro do container**, nunca direto na máquina do dev — `/models`
    é montado read-only.
 
-O `ppe-multiclass.pt` passou pelos três: nenhuma chamada perigosa nos opcodes e carga OK
-com allowlist explícita.
+O `ppe-multiclass.pt` foi validado pelo contrato estático; a inferência real ainda
+depende do ambiente com `.[cv]`/container.
 
 ## Outros modelos
 

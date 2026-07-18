@@ -1,48 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import APIRouter, Depends, HTTPException, Request
-except Exception:  # pragma: no cover
-    if TYPE_CHECKING:
-        from fastapi import APIRouter, Depends, HTTPException, Request
-    else:
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
-
-        class Depends:  # type: ignore[no-redef]
-            def __init__(self, dependency: Any):
-                self.dependency = dependency
-
-        class Request:  # type: ignore[no-redef]
-            pass
-
-        class APIRouter:  # type: ignore[no-redef]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def post(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
-
-            def get(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
-
-            def put(self, *args: Any, **kwargs: Any):
-                def decorator(func):
-                    return func
-
-                return decorator
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from ...domain.evidence import EvidencePurgeError
@@ -127,18 +88,23 @@ def update_retention_policy(organization_id: str, payload: EvidenceRetentionIn, 
 
 @router.get("/organizations/{organization_id}/evidence/purge-preview", dependencies=[Depends(require_permission("audit.read"))])
 def purge_preview(organization_id: str, request: Request, limit: int = DEFAULT_LIMIT, offset: int = 0) -> dict:
-    return _paginate(_service(request).preview_expired_evidence(organization_id), limit=limit, offset=offset)
+    items = _service(request).preview_expired_evidence(organization_id)
+    return _paginate(items, limit=limit, offset=offset)
 
 
 @router.get("/organizations/{organization_id}/evidence", dependencies=[Depends(require_permission("evidence.read"))])
 def list_evidence(organization_id: str, request: Request, limit: int = DEFAULT_LIMIT, offset: int = 0, incident_id: str | None = None) -> dict:
-    items = _service(request).list_evidence(organization_id, incident_id=incident_id, limit=None, offset=0)
-    return _paginate([item.__dict__ for item in items], limit=limit, offset=offset)
+    service_obj = _service(request)
+    items = service_obj.list_evidence(organization_id, incident_id=incident_id, limit=limit, offset=offset)
+    total = service_obj.count_evidence(organization_id, incident_id=incident_id) if hasattr(service_obj, "count_evidence") else len(service_obj.list_evidence(organization_id, incident_id=incident_id, limit=None, offset=0))
+    page_limit = max(1, min(limit, MAX_LIMIT))
+    page_offset = max(0, offset)
+    return {"items": [item.__dict__ for item in items], "page_info": {"limit": page_limit, "offset": page_offset, "total": total, "has_next": page_offset + page_limit < total}}
 
 
 @router.get("/organizations/{organization_id}/evidence/audit-logs", dependencies=[Depends(require_permission("audit.read"))])
 def list_audit_logs(organization_id: str, request: Request, limit: int = DEFAULT_LIMIT, offset: int = 0, incident_id: str | None = None, file_id: str | None = None, action: str | None = None) -> dict:
-    items = _service(request).list_audit_logs(organization_id, incident_id=incident_id, file_id=file_id, action=action, limit=None, offset=0)
+    items = _service(request).list_audit_logs(organization_id, incident_id=incident_id, file_id=file_id, action=action, limit=limit, offset=offset)
     return _paginate([item.__dict__ for item in items], limit=limit, offset=offset)
 
 

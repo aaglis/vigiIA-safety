@@ -200,7 +200,7 @@ export function SiteRoute() {
                     <span className="text-right">VALIDAÇÃO</span>
                   </div>
                   {siteCameras.map((camera) => {
-                    const source = cameraSource(camera.stream_identifier)
+                    const source = cameraSource(camera.stream_source_type)
                     const worker = workerForCamera(camera.id)
                     const scenarios = scenariosForCamera(camera.id)
                     const statusInfo = camera.status === 'suspended'
@@ -225,7 +225,7 @@ export function SiteRoute() {
                           </button>
                           <div className="mt-1 flex items-center gap-1.5">
                             <span className="flex-none rounded-[4px] px-1.5 py-px text-[9px] font-semibold tracking-[0.04em]" style={{ background: source.bg, color: source.color }}>{source.label}</span>
-                            <span className="truncate font-mono-ui text-[10px] text-[#A9A398]">{camera.stream_identifier}</span>
+                            <span className="truncate font-mono-ui text-[10px] text-[#A9A398]">{camera.display_stream_identifier ?? 'Fonte configurada'}</span>
                           </div>
                         </div>
                         {worker ? (
@@ -432,11 +432,17 @@ export function SiteRoute() {
                     ) : null}
 
                     {worker.last_telemetry ? (
-                      <dl className="mt-2.5 grid grid-cols-3 gap-2 border-t border-[#F0EDE6] pt-2.5" data-testid={`worker-telemetry-${worker.id}`}>
+                      <dl className="mt-2.5 grid grid-cols-2 gap-2 border-t border-[#F0EDE6] pt-2.5 sm:grid-cols-4" data-testid={`worker-telemetry-${worker.id}`}>
                         <div>
                           <dt className="font-mono-ui text-[9px] uppercase tracking-[0.1em] text-[#A9A398]">Inferência</dt>
                           <dd className="mt-0.5 text-[12px] text-[var(--ink)]">
                             {worker.last_telemetry.avg_inference_latency_ms != null ? `${Math.round(worker.last_telemetry.avg_inference_latency_ms)} ms` : '—'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="font-mono-ui text-[9px] uppercase tracking-[0.1em] text-[#A9A398]">Envio</dt>
+                          <dd className="mt-0.5 text-[12px] text-[var(--ink)]">
+                            {worker.last_telemetry.avg_send_latency_ms != null ? `${Math.round(worker.last_telemetry.avg_send_latency_ms)} ms` : '—'}
                           </dd>
                         </div>
                         <div>
@@ -515,7 +521,7 @@ export function SiteRoute() {
                     <span className="absolute left-2 top-2 rounded-[4px] bg-[rgba(252,250,247,0.85)] px-1.5 py-0.5 font-mono-ui text-[9px] text-[#8E887B]">{validationCamera.name}</span>
                     <span className="absolute inset-0 flex items-center justify-center font-mono-ui text-[10px] text-[#A9A398]">aguardando frame do worker</span>
                   </div>
-                  <p className="mt-2.5 font-mono-ui text-[10px] text-[#A9A398]">Fonte: {validationCamera.stream_identifier}</p>
+                  <p className="mt-2.5 font-mono-ui text-[10px] text-[#A9A398]">Fonte: {validationCamera.display_stream_identifier ?? 'Fonte configurada'}</p>
                 </div>
                 {/* Esperado (real) */}
                 <div className="border-b border-[#EDE9E1] p-[18px] lg:border-b-0 lg:border-r">

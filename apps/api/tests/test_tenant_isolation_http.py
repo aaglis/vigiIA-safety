@@ -140,6 +140,35 @@ class TenantIsolationHttpTest(unittest.TestCase):
         for path in ("sites", "cameras", "zones", "safety-rules", "required-ppe"):
             self.assertEqual(self.client.get(f"/api/v1/organizations/org-other/operations/{path}", headers=headers).status_code, 403)
 
+    def test_operations_camera_responses_do_not_expose_raw_stream_credentials(self) -> None:
+        headers = {**ORIGIN_HEADERS, settings.csrf_header_name: self.csrf}
+        secret_stream = "rtsp://camera-user:camera-pass@10.7.0.15:554/live"
+        camera = self.client.post(
+            "/api/v1/organizations/org-demo/operations/cameras",
+            json={"site_id": "site-demo", "name": "Cred Cam", "stream_identifier": secret_stream, "status": "active", "metadata": {}},
+            headers=headers,
+        )
+        self.assertEqual(camera.status_code, 200)
+        camera_payload = camera.json()["camera"]
+        self.assertNotIn("stream_identifier", camera_payload)
+        self.assertEqual(camera_payload["stream_source_type"], "rtsp")
+        self.assertIn("RTSP", camera_payload["display_stream_identifier"])
+        for leaked in ("camera-user", "camera-pass", "10.7.0.15", "live"):
+            self.assertNotIn(leaked, camera_payload["display_stream_identifier"])
+
+        listed = self.client.get("/api/v1/organizations/org-demo/operations/cameras", headers=headers).json()["items"]
+        listed_camera = next(item for item in listed if item["id"] == camera_payload["id"])
+        self.assertNotIn("stream_identifier", listed_camera)
+        catalog = self.client.get("/api/v1/organizations/org-demo/operations/catalog", headers=headers).json()
+        catalog_camera = next(item for item in catalog["cameras"] if item["id"] == camera_payload["id"])
+        nested_camera = next(item for item in catalog["sites"][0]["cameras"] if item["id"] == camera_payload["id"])
+        self.assertNotIn("stream_identifier", catalog_camera)
+        self.assertNotIn("stream_identifier", nested_camera)
+        for payload in (listed_camera, catalog_camera, nested_camera):
+            serialized = str(payload)
+            self.assertNotIn("camera-pass", serialized)
+            self.assertNotIn("10.7.0.15", serialized)
+
     def test_operations_mutations_require_permission_and_csrf(self) -> None:
         bad_csrf_headers = {**ORIGIN_HEADERS, settings.csrf_header_name: "bad"}
         good_headers = {**ORIGIN_HEADERS, settings.csrf_header_name: self.csrf}
@@ -169,7 +198,7 @@ class TenantIsolationHttpTest(unittest.TestCase):
         zone = self.client.post("/api/v1/organizations/org-demo/operations/zones", json={"site_id": site_id, "camera_id": camera_id, "zone_type": "access", "polygon_json": {"points": []}, "status": "active"}, headers=good_headers)
         self.assertEqual(zone.status_code, 200)
         zone_id = zone.json()["zone"]["id"]
-        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/cameras/{camera_id}", json={"site_id": site_id, "name": "Cam 2B", "stream_identifier": "rtsp://example-2", "status": "inactive", "metadata": {"source": "demo"}}, headers=good_headers).status_code, 200)
+        self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/cameras/{camera_id}", json={"site_id": site_id, "name": "Cam 2B", "status": "inactive"}, headers=good_headers).status_code, 200)
         self.assertEqual(self.client.patch(f"/api/v1/organizations/org-demo/operations/zones/{zone_id}", json={"site_id": site_id, "camera_id": camera_id, "zone_type": "restricted", "polygon_json": {"points": [[0, 0]]}, "status": "inactive"}, headers=good_headers).status_code, 200)
 
     def test_operations_mutations_reject_cross_tenant_and_nested_mismatch(self) -> None:

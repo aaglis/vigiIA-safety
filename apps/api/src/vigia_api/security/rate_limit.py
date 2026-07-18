@@ -4,28 +4,12 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from fastapi import HTTPException, Request
 from ..settings import settings
 
-try:  # pragma: no cover - optional runtime dependency
-    import redis
-except Exception:  # pragma: no cover
-    redis = None  # type: ignore[assignment]
-
-try:  # pragma: no cover - optional runtime dependency
-    from fastapi import HTTPException, Request
-except Exception:  # pragma: no cover
-    class HTTPException(Exception):
-        def __init__(self, status_code: int, detail: str) -> None:
-            super().__init__(detail)
-            self.status_code = status_code
-            self.detail = detail
-
-    if TYPE_CHECKING:
-        from fastapi import Request
-    else:
-        Request = Any  # type: ignore[assignment]
+import redis
 
 logger = logging.getLogger(__name__)
 

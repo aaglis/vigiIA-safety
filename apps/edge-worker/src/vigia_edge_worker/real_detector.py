@@ -7,6 +7,7 @@ from .config import WorkerConfig
 from .cv_analysis import DetectedBox, evaluate_violations
 from .detector import DetectionResult, FrameInput
 from .geometry import normalize_bbox
+from .model_manifest import ModelManifestError, verify_model_manifest
 
 
 @dataclass(frozen=True)
@@ -88,8 +89,15 @@ class RealDetector:
 
     def _ensure_model(self) -> Any:
         if self._model is None:
+            model_path = self.config.cv_model_path
+            if not model_path:
+                raise RealDetectorError("real detector requires CV_MODEL_PATH")
+            try:
+                verify_model_manifest(model_path, manifest_path=self.config.cv_model_manifest_path, version=self.config.cv_real_model_version)
+            except ModelManifestError as exc:
+                raise RealDetectorError(str(exc)) from exc
             from ultralytics import YOLO  # type: ignore
-            self._model = YOLO(self.config.cv_model_path)
+            self._model = YOLO(model_path)
             names = getattr(self._model, "names", {}) or {}
             pairs = names.items() if isinstance(names, dict) else enumerate(names)
             for idx, name in pairs:

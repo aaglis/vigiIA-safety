@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import time
 from typing import Any
 
 import asyncio
@@ -9,10 +11,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocke
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...domain.auth import Permission
+from ...observability import increment_metric, log_event
 from ...services.live_stream import LiveStreamService, LiveStreamUnavailable
 from ...security.dependencies import get_current_organization_membership, require_permission
 
 router = APIRouter()
+
+_FRAME_ANALYSIS_CONFIG_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 
 class StreamAuthIn(BaseModel):
@@ -79,6 +84,27 @@ class FrameAnalysisIn(BaseModel):
     violations: list[ViolationIn] = Field(default_factory=list, max_length=64)
 
 
+def _cached_worker_config(container, client_id: str, api_key: str) -> dict[str, Any]:
+    ttl = max(0.0, float(getattr(container.settings, "frame_analysis_config_cache_seconds", 0.0)))
+    key = (client_id, hashlib.sha256(api_key.encode("utf-8")).hexdigest())
+    now = time.monotonic()
+    cached = _FRAME_ANALYSIS_CONFIG_CACHE.get(key)
+    if ttl > 0 and cached is not None and cached[0] > now:
+        return cached[1]
+    config = container.edge_worker_service.config(client_id, api_key)
+    worker = config.get("worker") or {}
+    snapshot = {
+        "worker": {
+            "id": worker.get("id"),
+            "organization_id": worker.get("organization_id"),
+        },
+        "cameras": [{"id": camera.get("id")} for camera in config.get("cameras", [])],
+    }
+    if ttl > 0:
+        _FRAME_ANALYSIS_CONFIG_CACHE[key] = (now + ttl, snapshot)
+    return snapshot
+
+
 @router.post("/edge-workers/me/frame-analysis", status_code=202)
 def publish_frame_analysis(
     payload: FrameAnalysisIn,
@@ -92,7 +118,7 @@ def publish_frame_analysis(
         raise HTTPException(status_code=401, detail="missing worker credentials")
     container = request.app.state.container
     try:
-        config = container.edge_worker_service.config(x_edge_client_id, x_edge_api_key)
+        config = _cached_worker_config(container, x_edge_client_id, x_edge_api_key)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     allowed = {camera.get("id") for camera in config.get("cameras", [])}
@@ -101,8 +127,16 @@ def publish_frame_analysis(
     organization_id = (config.get("worker") or {}).get("organization_id")
     if not organization_id:
         raise HTTPException(status_code=403, detail="worker without organization")
-    delivered = container.detection_hub.publish(organization_id, payload.camera_id, payload.model_dump())
-    return {"status": "accepted", "delivered_to": delivered}
+    worker_id = (config.get("worker") or {}).get("id")
+    subscribers = container.detection_hub.subscriber_count(organization_id, payload.camera_id)
+    increment_metric("frame_analysis", (organization_id, payload.camera_id, "received"))
+    if subscribers <= 0:
+        increment_metric("frame_analysis", (organization_id, payload.camera_id, "dropped_no_subscribers"))
+        log_event("frame_analysis.dropped", organization_id=organization_id, edge_worker_id=worker_id, camera_id=payload.camera_id, reason="no_subscribers", subscribers=0)
+        return {"status": "accepted"}
+    container.detection_hub.publish(organization_id, payload.camera_id, payload.model_dump())
+    increment_metric("frame_analysis", (organization_id, payload.camera_id, "published"), amount=subscribers)
+    return {"status": "accepted"}
 
 
 @router.websocket("/organizations/{organization_id}/operations/cameras/{camera_id}/detections")
